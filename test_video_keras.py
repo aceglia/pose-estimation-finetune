@@ -72,6 +72,17 @@ def draw_keypoints(frame, keypoints, labels=None):
         cv2.putText(frame, label, (kp['x'] + 15, kp['y'] - 10),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
+    # Dessiner les connexions (squelette)
+    if len(keypoints) >= 3:
+        # Hanche -> Genoux
+        cv2.line(frame, (keypoints[0]['x'], keypoints[0]['y']), 
+                (keypoints[1]['x'], keypoints[1]['y']), (255, 255, 0), 2)
+        # Genoux -> Cheville
+        cv2.line(frame, (keypoints[1]['x'], keypoints[1]['y']), 
+                (keypoints[2]['x'], keypoints[2]['y']), (255, 255, 0), 2)
+
+    return frame
+
 
 def process_video(video_path, model_path, output_path=None):
     """Traite une vidéo complète"""
