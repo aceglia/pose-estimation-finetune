@@ -171,7 +171,7 @@ def test_tflite_model(tflite_path, X_test, y_test, num_samples=10):
     return avg_error
 
 
-def export_model(model=None, model_path=None, X_val=None, model_name="pose_model"):
+def export_model(model=None, model_path=None, X_val=None, model_name="pose_model", model_dir=None):
     """
     Pipeline complet d'export du modèle en TFLite avec deux versions optimisées
     
@@ -180,6 +180,7 @@ def export_model(model=None, model_path=None, X_val=None, model_name="pose_model
         model_path: Chemin vers le modèle sauvegardé (optionnel si model est fourni)
         X_val: Dataset de validation pour la quantization
         model_name: Nom du modèle
+        model_dir: Dossier racine du modèle (si None, utilise config.MODELS_DIR)
     
     Returns:
         tflite_paths: Dictionnaire avec les chemins des modèles exportés
@@ -188,9 +189,12 @@ def export_model(model=None, model_path=None, X_val=None, model_name="pose_model
     print("🚀 EXPORT DU MODÈLE EN TENSORFLOW LITE")
     print("=" * 60)
     
+    # Déterminer le dossier des modèles
+    models_dir = config.MODELS_DIR if model_dir is None else os.path.join(model_dir, "models")
+    
     # Si un modèle Keras est fourni, le sauvegarder d'abord
     if model is not None:
-        saved_model_dir = os.path.join(config.MODELS_DIR, f"{model_name}_for_export")
+        saved_model_dir = os.path.join(models_dir, f"{model_name}_for_export")
         print(f"\n💾 Sauvegarde du modèle au format SavedModel...")
         model.save(saved_model_dir, save_format='tf')
         model_path = saved_model_dir
@@ -216,7 +220,7 @@ def export_model(model=None, model_path=None, X_val=None, model_name="pose_model
     print("=" * 40)
     print("🎯 RECOMMANDÉ: Précision optimale + taille réduite")
     
-    tflite_dynamic_path = os.path.join(config.MODELS_DIR, f"{model_name}_dynamic.tflite")
+    tflite_dynamic_path = os.path.join(models_dir, f"{model_name}_dynamic.tflite")
     dynamic_size = convert_to_tflite(
         model_path=model_path,
         output_path=tflite_dynamic_path,
@@ -232,7 +236,7 @@ def export_model(model=None, model_path=None, X_val=None, model_name="pose_model
     print("=" * 40)
     print("🎯 TESTS: Précision maximale (taille importante)")
     
-    tflite_float32_path = os.path.join(config.MODELS_DIR, f"{model_name}_float32.tflite")
+    tflite_float32_path = os.path.join(models_dir, f"{model_name}_float32.tflite")
     float32_size = convert_to_tflite(
         model_path=model_path,
         output_path=tflite_float32_path,

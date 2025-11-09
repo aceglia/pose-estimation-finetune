@@ -230,12 +230,21 @@ def main():
     
     # Trouver le modèle si non spécifié
     if not args.model:
-        models_dir = Path(config.MODELS_DIR)
-        tflite_models = list(models_dir.glob("*.tflite"))
+        # Chercher dans tous les dossiers de modèles
+        output_dir = Path(config.OUTPUT_DIR)
+        tflite_models = []
+        
+        # Parcourir tous les dossiers de modèles
+        for model_dir in output_dir.iterdir():
+            if model_dir.is_dir() and not model_dir.name.startswith('.'):
+                models_subdir = model_dir / "models"
+                if models_subdir.exists():
+                    tflite_models.extend(list(models_subdir.glob("*.tflite")))
         
         if tflite_models:
+            # Prendre le plus récent
             args.model = str(max(tflite_models, key=os.path.getctime))
-            print(f"💡 Utilisation du modèle: {args.model}")
+            print(f"💡 Utilisation du modèle le plus récent: {args.model}")
         else:
             print("❌ Aucun modèle .tflite trouvé!")
             print("💡 Entraînez d'abord le modèle avec: python main.py")
@@ -254,8 +263,13 @@ def main():
         else:
             model_type = 'tflite'
         
-        args.output = f"output/{video_name}_{model_type}_annotated.mp4"
-        os.makedirs("output", exist_ok=True)
+        # Utiliser le dossier videos du modèle actuel
+        model_path = Path(args.model)
+        model_dir = model_path.parent.parent  # Remonter de models/ vers le dossier du modèle
+        videos_dir = model_dir / "videos"
+        videos_dir.mkdir(exist_ok=True)
+        
+        args.output = str(videos_dir / f"{video_name}_{model_type}_annotated.mp4")
     
     # Traiter la vidéo
     try:

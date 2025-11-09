@@ -16,20 +16,25 @@ from tensorflow.keras.callbacks import (
 import config
 
 
-def create_callbacks(model_name="pose_model"):
+def create_callbacks(model_name="pose_model", model_dir=None):
     """
     Crée les callbacks pour l'entraînement
     
     Args:
         model_name: Nom du modèle pour sauvegarder les fichiers
+        model_dir: Dossier racine du modèle (si None, utilise config)
     
     Returns:
         callbacks: Liste des callbacks
     """
+    # Déterminer les dossiers
+    models_dir = config.MODELS_DIR if model_dir is None else os.path.join(model_dir, "models")
+    logs_dir = config.LOGS_DIR if model_dir is None else os.path.join(model_dir, "logs")
+    
     callbacks = []
     
     # 1. ModelCheckpoint - Sauvegarde le meilleur modèle
-    checkpoint_path = os.path.join(config.MODELS_DIR, f"{model_name}_best.h5")
+    checkpoint_path = os.path.join(models_dir, f"{model_name}_best.h5")
     checkpoint = ModelCheckpoint(
         checkpoint_path,
         monitor='val_loss',
@@ -63,7 +68,7 @@ def create_callbacks(model_name="pose_model"):
     
     # 4. TensorBoard - Visualisation de l'entraînement
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    log_dir = os.path.join(config.LOGS_DIR, f"{model_name}_{timestamp}")
+    log_dir = os.path.join(logs_dir, f"{model_name}_{timestamp}")
     tensorboard = TensorBoard(
         log_dir=log_dir,
         histogram_freq=1,
@@ -73,7 +78,7 @@ def create_callbacks(model_name="pose_model"):
     callbacks.append(tensorboard)
     
     # 5. CSVLogger - Sauvegarde les métriques dans un CSV
-    csv_path = os.path.join(config.LOGS_DIR, f"{model_name}_training_log.csv")
+    csv_path = os.path.join(logs_dir, f"{model_name}_training_log.csv")
     csv_logger = CSVLogger(csv_path, append=True)
     callbacks.append(csv_logger)
     
@@ -90,103 +95,114 @@ def create_data_augmentation():
     Crée un pipeline d'augmentation de données (optionnel)
     
     Returns:
-        augmentation: Sequential de couches d'augmentation Keras
+        augmentation: ImageDataGenerator pour l'augmentation
     """
     if not config.USE_AUGMENTATION:
         return None
     
-    augmentation = keras.Sequential([
-        # Flip horizontal aléatoire
-        keras.layers.RandomFlip("horizontal"),
-        
-        # Rotation aléatoire
-        keras.layers.RandomRotation(
-            factor=config.AUGMENTATION_CONFIG['rotation_range'] / 360.0
-        ),
-        
-        # Zoom aléatoire
-        keras.layers.RandomZoom(
-            height_factor=(-config.AUGMENTATION_CONFIG['zoom_range'], 
-                          config.AUGMENTATION_CONFIG['zoom_range'])
-        ),
-        
-        # Translation aléatoire
-        keras.layers.RandomTranslation(
-            height_factor=config.AUGMENTATION_CONFIG['height_shift_range'],
-            width_factor=config.AUGMENTATION_CONFIG['width_shift_range']
-        ),
-    ], name="data_augmentation")
+    from tensorflow.keras.preprocessing.image import ImageDataGenerator
+    
+    datagen = ImageDataGenerator(
+        rotation_range=config.AUGMENTATION_CONFIG['rotation_range'],
+        width_shift_range=config.AUGMENTATION_CONFIG['width_shift_range'],
+        height_shift_range=config.AUGMENTATION_CONFIG['height_shift_range'],
+        zoom_range=config.AUGMENTATION_CONFIG['zoom_range'],
+        horizontal_flip=config.AUGMENTATION_CONFIG['horizontal_flip'],
+        fill_mode=config.AUGMENTATION_CONFIG['fill_mode']
+    )
     
     print("\n🔄 Augmentation de données activée")
-    return augmentation
+    return datagen
 
 
-def train_model(model, X_train, y_train, X_val, y_val, model_name="pose_model"):
+def train_model(model, X_train, y_train, X_val, y_val, model_name="pose_model", model_dir=None):
     """
-    Entraîne le modèle
+    Entraîne le modèle avec les callbacks appropriés
     
     Args:
-        model: Modèle Keras compilé
-        X_train: Images d'entraînement
-        y_train: Heatmaps d'entraînement
-        X_val: Images de validation
-        y_val: Heatmaps de validation
+        model: Modèle Keras à entraîner
+        X_train, y_train: Données d'entraînement
+        X_val, y_val: Données de validation
         model_name: Nom du modèle
+        model_dir: Dossier racine du modèle
     
     Returns:
         history: Historique de l'entraînement
     """
     print("=" * 60)
-    print("🚀 ENTRAÎNEMENT DU MODÈLE")
+    print("🏋️  ENTRAÎNEMENT DU MODÈLE")
     print("=" * 60)
     
     # Créer les callbacks
-    callbacks = create_callbacks(model_name)
+    callbacks = create_callbacks(model_name, model_dir)
     
-    # Créer l'augmentation (optionnel - note: complexe à implémenter correctement
-    # pour les heatmaps, donc désactivé par défaut dans ce script)
-    # Pour augmenter correctement, il faudrait aussi transformer les heatmaps
-    # de la même manière que les images
-    
-    print(f"\n📊 Configuration de l'entraînement:")
-    print(f"   - Epochs: {config.EPOCHS}")
-    print(f"   - Batch size: {config.BATCH_SIZE}")
-    print(f"   - Learning rate: {config.LEARNING_RATE}")
-    print(f"   - Train samples: {len(X_train)}")
-    print(f"   - Val samples: {len(X_val)}")
-    
-    # Entraînement
-    print(f"\n🏋️  Début de l'entraînement...")
-    history = model.fit(
-        X_train, y_train,
-        validation_data=(X_val, y_val),
-        epochs=config.EPOCHS,
-        batch_size=config.BATCH_SIZE,
-        callbacks=callbacks,
-        verbose=config.VERBOSE
+    # Compiler le modèle
+    model.compile(
+        optimizer=config.OPTIMIZER,
+        loss='mse',
+        metrics=['mae']
     )
     
-    print("\n✅ Entraînement terminé!")
-    print("=" * 60)
+    # Créer l'augmentation de données si activée
+    if config.USE_AUGMENTATION:
+        augmentation = create_data_augmentation()
+        if augmentation is not None:
+            # Entraîner avec augmentation
+            train_generator = augmentation.flow(X_train, y_train, batch_size=config.BATCH_SIZE)
+            history = model.fit(
+                train_generator,
+                validation_data=(X_val, y_val),
+                epochs=config.EPOCHS,
+                callbacks=callbacks,
+                verbose=config.VERBOSE,
+                steps_per_epoch=len(X_train) // config.BATCH_SIZE
+            )
+        else:
+            # Entraîner sans augmentation
+            history = model.fit(
+                X_train, y_train,
+                validation_data=(X_val, y_val),
+                batch_size=config.BATCH_SIZE,
+                epochs=config.EPOCHS,
+                callbacks=callbacks,
+                verbose=config.VERBOSE
+            )
+    else:
+        # Entraîner sans augmentation
+        history = model.fit(
+            X_train, y_train,
+            validation_data=(X_val, y_val),
+            batch_size=config.BATCH_SIZE,
+            epochs=config.EPOCHS,
+            callbacks=callbacks,
+            verbose=config.VERBOSE
+        )
     
     return history
 
 
-def save_final_model(model, model_name="pose_model"):
+def save_final_model(model, model_name="pose_model", model_dir=None):
     """
     Sauvegarde le modèle final
     
     Args:
         model: Modèle Keras entraîné
         model_name: Nom du modèle
+        model_dir: Dossier racine du modèle
+    
+    Returns:
+        tuple: (final_model_path, saved_model_dir)
     """
+    # Déterminer le dossier des modèles
+    models_dir = config.MODELS_DIR if model_dir is None else os.path.join(model_dir, "models")
+    
     # Sauvegarder le modèle complet (architecture + poids)
-    final_model_path = os.path.join(config.MODELS_DIR, f"{model_name}_final.h5")
+    final_model_path = os.path.join(models_dir, f"{model_name}_final.h5")
     model.save(final_model_path)
     print(f"\n💾 Modèle final sauvegardé: {final_model_path}")
     
     # Sauvegarder aussi au format SavedModel (pour TFLite)
-    saved_model_dir = os.path.join(config.MODELS_DIR, f"{model_name}_saved_model")
+    saved_model_dir = os.path.join(models_dir, f"{model_name}_saved_model")
     model.save(saved_model_dir, save_format='tf')
     print(f"💾 SavedModel sauvegardé: {saved_model_dir}")
     

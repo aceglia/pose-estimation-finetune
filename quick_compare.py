@@ -8,25 +8,47 @@ from pathlib import Path
 
 def find_latest_model(pattern):
     """Trouve le modèle le plus récent correspondant au pattern"""
-    models_dir = Path('output/models')
-    matching_models = list(models_dir.glob(pattern))
+    from config import OUTPUT_DIR
+    output_dir = Path(OUTPUT_DIR)
+    
+    # Chercher dans tous les dossiers de modèles
+    matching_models = []
+    for model_dir in output_dir.iterdir():
+        if model_dir.is_dir() and not model_dir.name.startswith('.'):
+            models_subdir = model_dir / "models"
+            if models_subdir.exists():
+                matching_models.extend(list(models_subdir.glob(pattern)))
+    
     if not matching_models:
         return None
     # Trier par date de modification (le plus récent en premier)
     return max(matching_models, key=lambda p: p.stat().st_mtime)
 
-# Charger les données
+# Charger les données depuis le modèle le plus récent
 print("📂 Chargement des données...")
-data = np.load('output/preprocessed_data.npz')
-X_val = data['X_val']
+if keras_model:
+    # Utiliser les données du dossier du modèle Keras le plus récent
+    model_dir = keras_model.parent.parent
+    data_path = model_dir / "preprocessed_data.npz"
+    if data_path.exists():
+        data = np.load(str(data_path))
+        X_val = data['X_val']
+        print(f"✅ Données chargées depuis: {data_path}")
+    else:
+        print(f"❌ Données non trouvées dans: {data_path}")
+        print("💡 Les données doivent être dans le dossier du modèle")
+        exit(1)
+else:
+    print("❌ Aucun modèle Keras trouvé pour charger les données")
+    exit(1)
 
 print("\n🔍 Recherche des modèles disponibles...")
 print("=" * 60)
 
 # Trouver les modèles
 keras_model = find_latest_model('pose_model_*_best.h5')
-dynamic_model = Path('output/models/pose_model_dynamic.tflite')
-float32_model = Path('output/models/pose_model_float32.tflite')
+dynamic_model = find_latest_model('pose_model_dynamic.tflite')
+float32_model = find_latest_model('pose_model_float32.tflite')
 
 models_found = []
 if keras_model and keras_model.exists():
@@ -35,13 +57,13 @@ if keras_model and keras_model.exists():
 else:
     print("❌ Aucun modèle Keras trouvé")
 
-if dynamic_model.exists():
+if dynamic_model and dynamic_model.exists():
     models_found.append(('Dynamic', str(dynamic_model)))
     print(f"✅ Dynamic: {dynamic_model.name}")
 else:
     print("❌ Modèle Dynamic non trouvé")
 
-if float32_model.exists():
+if float32_model and float32_model.exists():
     models_found.append(('Float32', str(float32_model)))
     print(f"✅ Float32: {float32_model.name}")
 else:
@@ -49,6 +71,24 @@ else:
 
 if len(models_found) < 2:
     print("\n❌ Pas assez de modèles pour faire des comparaisons")
+    exit(1)
+
+# Charger les données depuis le modèle Keras le plus récent
+print("\n📂 Chargement des données...")
+if keras_model:
+    # Utiliser les données du dossier du modèle Keras le plus récent
+    model_dir = keras_model.parent.parent
+    data_path = model_dir / "preprocessed_data.npz"
+    if data_path.exists():
+        data = np.load(str(data_path))
+        X_val = data['X_val']
+        print(f"✅ Données chargées depuis: {data_path}")
+    else:
+        print(f"❌ Données non trouvées dans: {data_path}")
+        print("💡 Les données doivent être dans le dossier du modèle")
+        exit(1)
+else:
+    print("❌ Aucun modèle Keras trouvé pour charger les données")
     exit(1)
 
 print(f"\n🧪 Test sur {len(X_val)} échantillons de validation")

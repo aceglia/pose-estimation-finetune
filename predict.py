@@ -226,12 +226,19 @@ def main():
     
     # Vérifier les arguments
     if not args.model:
-        # Chercher le dernier modèle dans output/models
-        models_dir = Path(config.MODELS_DIR)
-        if args.tflite:
-            models = list(models_dir.glob("*.tflite"))
-        else:
-            models = list(models_dir.glob("*_best.h5"))
+        # Chercher le dernier modèle dans tous les dossiers de modèles
+        output_dir = Path(config.OUTPUT_DIR)
+        models = []
+        
+        # Parcourir tous les dossiers de modèles
+        for model_dir in output_dir.iterdir():
+            if model_dir.is_dir() and not model_dir.name.startswith('.'):
+                models_subdir = model_dir / "models"
+                if models_subdir.exists():
+                    if args.tflite:
+                        models.extend(list(models_subdir.glob("*.tflite")))
+                    else:
+                        models.extend(list(models_subdir.glob("*_best.h5")))
         
         if models:
             args.model = str(max(models, key=os.path.getctime))
@@ -247,6 +254,11 @@ def main():
     
     # Faire les prédictions
     try:
+        # Déterminer le dossier de sortie basé sur le modèle actuel
+        model_path = Path(args.model)
+        model_dir = model_path.parent.parent  # Remonter de models/ vers le dossier du modèle
+        default_output_dir = model_dir / "predictions"
+        
         if args.tflite:
             if args.image:
                 predict_with_tflite(args.model, args.image)
@@ -254,9 +266,9 @@ def main():
                 print("❌ --tflite supporte seulement --image pour le moment")
         else:
             if args.image:
-                predict_on_image(args.model, args.image, output_path=args.output + "_single.png")
+                predict_on_image(args.model, args.image, output_path=str(default_output_dir / "prediction_single.png"))
             elif args.folder:
-                predict_on_folder(args.model, args.folder, args.output, args.max_images)
+                predict_on_folder(args.model, args.folder, str(default_output_dir), args.max_images)
     
     except Exception as e:
         print(f"\n❌ Erreur: {e}")

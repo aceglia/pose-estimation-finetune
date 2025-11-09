@@ -160,7 +160,7 @@ def main():
     """Fonction principale"""
     parser = argparse.ArgumentParser(description="Test du modèle Keras sur une vidéo")
     parser.add_argument('--video', required=True, help='Chemin vers la vidéo à analyser')
-    parser.add_argument('--model', default='output/models/pose_model_20251105_115946_best.h5',
+    parser.add_argument('--model', default=None,
                        help='Chemin vers le modèle Keras (.h5)')
     parser.add_argument('--output', help='Chemin de sortie pour la vidéo annotée')
 
@@ -171,10 +171,44 @@ def main():
         print(f"❌ Vidéo non trouvée: {args.video}")
         return
 
+    # Trouver le modèle si non spécifié
+    if not args.model:
+        # Chercher dans tous les dossiers de modèles
+        output_dir = Path(config.OUTPUT_DIR)
+        keras_models = []
+        
+        # Parcourir tous les dossiers de modèles
+        for model_dir in output_dir.iterdir():
+            if model_dir.is_dir() and not model_dir.name.startswith('.'):
+                models_subdir = model_dir / "models"
+                if models_subdir.exists():
+                    keras_models.extend(list(models_subdir.glob("*.h5")))
+        
+        if keras_models:
+            # Prendre le plus récent
+            args.model = str(max(keras_models, key=os.path.getctime))
+            print(f"💡 Utilisation du modèle Keras le plus récent: {args.model}")
+        else:
+            print("❌ Aucun modèle Keras (.h5) trouvé!")
+            print("💡 Entraînez d'abord le modèle avec: python main.py")
+            return
+
     # Vérifier que le modèle existe
     if not os.path.exists(args.model):
         print(f"❌ Modèle non trouvé: {args.model}")
         return
+
+    # Output par défaut
+    if not args.output:
+        video_name = Path(args.video).stem
+        
+        # Utiliser le dossier videos du modèle actuel
+        model_path = Path(args.model)
+        model_dir = model_path.parent.parent  # Remonter de models/ vers le dossier du modèle
+        videos_dir = model_dir / "videos"
+        videos_dir.mkdir(exist_ok=True)
+        
+        args.output = str(videos_dir / f"{video_name}_keras_annotated.mp4")
 
     # Traiter la vidéo
     try:

@@ -18,6 +18,17 @@ def main(args):
     print("🎯 PIPELINE DE FINE-TUNING - POSE ESTIMATION")
     print("=" * 60)
 
+    # ÉTAPE 0: Configuration des dossiers
+    print("\n📁 CONFIGURATION DES DOSSIERS")
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    model_folder_name = config.get_model_folder_name(config.BACKBONE, timestamp)
+    model_dir, models_dir, logs_dir, videos_dir = config.setup_model_directories(model_folder_name)
+
+    print(f"📂 Dossier modèle: {model_folder_name}")
+    print(f"   - Modèles: {models_dir}")
+    print(f"   - Logs: {logs_dir}")
+    print(f"   - Vidéos: {videos_dir}")
+
     tflite_path = None  # Initialiser
 
     # ÉTAPE 1: Préparation des données
@@ -26,12 +37,12 @@ def main(args):
         X_train, X_val, y_train, y_val = prepare_data()
 
         if args.save_data:
-            data_path = os.path.join(config.OUTPUT_DIR, "preprocessed_data.npz")
+            data_path = os.path.join(model_dir, "preprocessed_data.npz")
             np.savez_compressed(data_path, X_train=X_train, X_val=X_val, y_train=y_train, y_val=y_val)
             print(f"💾 Données sauvegardées: {data_path}")
     else:
         print("\n⏩ Chargement des données prétraitées...")
-        data_path = os.path.join(config.OUTPUT_DIR, "preprocessed_data.npz")
+        data_path = os.path.join(model_dir, "preprocessed_data.npz")
         data = np.load(data_path)
         X_train = data['X_train']
         X_val = data['X_val']
@@ -46,14 +57,14 @@ def main(args):
 
         # ÉTAPE 3: Entraînement
         print("\nÉTAPE 3/4 - ENTRAÎNEMENT")
-        model_name = f"pose_model_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        model_name = "pose_model"  # Nom simplifié car le dossier contient déjà la date/backbone
 
-        history = train_model(model=model, X_train=X_train, y_train=y_train, X_val=X_val, y_val=y_val, model_name=model_name)
-        final_model_path, saved_model_dir = save_final_model(model, model_name)
+        history = train_model(model=model, X_train=X_train, y_train=y_train, X_val=X_val, y_val=y_val, model_name=model_name, model_dir=model_dir)
+        final_model_path, saved_model_dir = save_final_model(model, model_name, model_dir)
         metrics = evaluate_model(model, X_val, y_val)
 
         if args.plot_history:
-            plot_path = os.path.join(config.OUTPUT_DIR, f"{model_name}_history.png")
+            plot_path = os.path.join(logs_dir, f"{model_name}_history.png")
             plot_training_history(history, save_path=plot_path)
     else:
         print("\n⏩ Chargement du modèle entraîné...")
@@ -68,7 +79,7 @@ def main(args):
     tflite_paths = None
     if not args.skip_export:
         print("\nÉTAPE 4/4 - EXPORT TENSORFLOW LITE")
-        tflite_paths = export_model(model_path=saved_model_dir, X_val=X_val, model_name=model_name)
+        tflite_paths = export_model(model_path=saved_model_dir, X_val=X_val, model_name=model_name, model_dir=model_dir)
 
         if args.test_tflite:
             # Tester le modèle recommandé (dynamic)
@@ -78,9 +89,10 @@ def main(args):
     print("\n" + "=" * 60)
     print("🎉 PIPELINE TERMINÉ AVEC SUCCÈS!")
     print("=" * 60)
-    print(f"\n📂 Résultats sauvegardés dans: {config.OUTPUT_DIR}")
-    print(f"   - Modèles: {config.MODELS_DIR}")
-    print(f"   - Logs: {config.LOGS_DIR}")
+    print(f"\n📂 Résultats sauvegardés dans: {model_dir}")
+    print(f"   - Modèles: {models_dir}")
+    print(f"   - Logs: {logs_dir}")
+    print(f"   - Vidéos: {videos_dir}")
 
     if tflite_paths:
         print(f"\n📱 Modèles TFLite prêts pour le déploiement:")

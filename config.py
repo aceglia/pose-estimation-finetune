@@ -2,17 +2,54 @@
 Configuration pour le fine-tuning de pose estimation
 """
 import os
+from datetime import datetime
 
 # Chemins
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LABELED_DATA_DIR = os.path.join(BASE_DIR, "labeled-data")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
-MODELS_DIR = os.path.join(OUTPUT_DIR, "models")
-LOGS_DIR = os.path.join(OUTPUT_DIR, "logs")
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-os.makedirs(MODELS_DIR, exist_ok=True)
-os.makedirs(LOGS_DIR, exist_ok=True)
+# Fonction pour créer le nom du dossier modèle
+def get_model_folder_name(backbone=None, timestamp=None):
+    """Génère le nom du dossier pour un modèle spécifique"""
+    if backbone is None:
+        backbone = BACKBONE
+    if timestamp is None:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+    # Nettoyer le nom du backbone (enlever caractères spéciaux)
+    clean_backbone = backbone.replace("MobileNetV3", "MNv3").replace("MobileNetV2", "MNv2")
+
+    return f"{clean_backbone}_{timestamp}"
+
+# Dossier modèle actuel (sera défini dynamiquement)
+MODEL_DIR = None
+MODELS_DIR = None
+LOGS_DIR = None
+VIDEOS_DIR = None
+
+def setup_model_directories(model_folder_name=None):
+    """Configure les dossiers pour un modèle spécifique"""
+    global MODEL_DIR, MODELS_DIR, LOGS_DIR, VIDEOS_DIR
+
+    if model_folder_name is None:
+        model_folder_name = get_model_folder_name()
+
+    MODEL_DIR = os.path.join(OUTPUT_DIR, model_folder_name)
+    MODELS_DIR = os.path.join(MODEL_DIR, "models")
+    LOGS_DIR = os.path.join(MODEL_DIR, "logs")
+    VIDEOS_DIR = os.path.join(MODEL_DIR, "videos")
+
+    # Créer tous les dossiers
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    os.makedirs(LOGS_DIR, exist_ok=True)
+    os.makedirs(VIDEOS_DIR, exist_ok=True)
+
+    return MODEL_DIR, MODELS_DIR, LOGS_DIR, VIDEOS_DIR
+
+# Initialisation par défaut (sera remplacée lors de l'entraînement)
+# setup_model_directories()  # Commenté pour éviter l'appel automatique
 
 # Points clés
 BODYPARTS = ["Hanche", "Genoux", "Cheville"]

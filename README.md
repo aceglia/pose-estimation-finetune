@@ -115,26 +115,39 @@ Format CSV DeepLabCut avec colonnes :
 
 ## Résultats
 
-Après exécution, les fichiers sont sauvegardés dans `output/` :
+Après exécution, les fichiers sont sauvegardés dans `output/` avec une structure organisée :
 
-- `models/` : Modèles Keras (.h5) et **2 modèles TFLite optimisés**
-  - `pose_model_dynamic.tflite` ⭐ **RECOMMANDÉ** : 6MB, précision ~1px
-  - `pose_model_float32.tflite` 🔬 **TESTS** : 22MB, précision maximale
-- `logs/` : Logs d'entraînement
-- Vidéos annotées : `{nom_video}_{type_modele}_annotated.mp4`
-  - `*_dynamic_annotated.mp4` : Annotations avec modèle TFLite Dynamic
-  - `*_float32_annotated.mp4` : Annotations avec modèle TFLite Float32
-  - `*_keras_annotated.mp4` : Annotations avec modèle Keras
+```
+output/
+└── Backbone_Date/                    # ex: MNv2_20251108_190128/
+    ├── models/                       # Modèles entraînés
+    │   ├── pose_model_best.h5        # Meilleur modèle Keras
+    │   ├── pose_model_final.h5       # Modèle final Keras
+    │   ├── pose_model_saved_model/   # SavedModel pour TFLite
+    │   ├── pose_model_dynamic.tflite
+    │   └── pose_model_float32.tflite
+    ├── logs/                         # Logs et métriques
+    │   ├── pose_model_YYYYMMDD-HHMMSS/  # TensorBoard
+    │   ├── pose_model_history.png    # Courbes d'apprentissage
+    │   └── pose_model_training_log.csv # Logs CSV
+    ├── videos/                       # Vidéos annotées de test
+    └── preprocessed_data.npz         # Données prétraitées
+```
+
+### Modèles exportés
+
+- **Dynamic (.tflite)** ⭐ RECOMMANDÉ : 6MB, précision ~1px, production mobile
+- **Float32 (.tflite)** 🔬 TESTS : 22MB, précision maximale, validation
 
 ## Métriques
 
-Le modèle atteint généralement :
+Le modèle atteint généralement (résultats du dernier test) :
 
-- **Précision TFLite Dynamic** : ~1 pixel d'erreur moyenne (recommandé)
-- **Précision TFLite Float32** : ~0 pixel d'erreur (tests/validation)
+- **Précision finale** : MAE = 0.119 (pixels)
 - **Taille modèle Dynamic** : ~6MB (optimisé pour mobile)
 - **Taille modèle Float32** : ~22MB (haute précision)
 - **Vitesse** : ~30 FPS sur CPU mobile
+- **Convergence** : Loss de 0.163 → 0.015 en 5 epochs
 
 ## Architecture
 
@@ -142,3 +155,4 @@ Le modèle atteint généralement :
 - **Tête** : Déconvolution 3 étages
 - **Sortie** : Heatmaps 48x48x3
 - **Fine-tuning** : Backbone gelé, seulement la tête entraînée
+- **Augmentation** : Rotation, translation, zoom, flip horizontal
