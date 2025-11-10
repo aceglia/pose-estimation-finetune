@@ -203,7 +203,7 @@ def save_final_model(model, model_name="pose_model", model_dir=None):
     
     # Sauvegarder aussi au format SavedModel (pour TFLite)
     saved_model_dir = os.path.join(models_dir, f"{model_name}_saved_model")
-    model.save(saved_model_dir, save_format='tf')
+    model.export(saved_model_dir)
     print(f"💾 SavedModel sauvegardé: {saved_model_dir}")
     
     return final_model_path, saved_model_dir
