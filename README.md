@@ -81,11 +81,27 @@ python quick_compare.py
 # Génère: *_keras_annotated.mp4 et *_dynamic_annotated.mp4
 ```
 
+### Export analyse vidéo en CSV (comparaison modèles)
+
+```bash
+# Exporte les positions des keypoints pour tous les formats de modèles
+python export_video_analysis.py --video "votre_video.mp4" --model-dir "output/MNv2_20251113_123456"
+
+# Sortie:
+#   - votre_video_analysis.csv (format long)
+#   - votre_video_analysis_pivot.csv (format pivot pour comparaison)
+# Compare: Keras, TFLite float32, dynamic, int8
+```
+
+# Génère: _\_keras_annotated.mp4 et _\_dynamic_annotated.mp4
+
+````
+
 ### Prédiction sur une image
 
 ```bash
 python predict.py --image "votre_image.jpg" --model "output/models/pose_model_best.h5"
-```
+````
 
 ## Options principales
 
