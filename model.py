@@ -2,6 +2,10 @@
 Construction du modèle de pose estimation avec support multi-backbones
 Supporte: MobileNetV2/V3, EfficientNetLite, EfficientNetB, EfficientNetV2
 """
+import os 
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
+
+
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers, Model
@@ -11,7 +15,6 @@ from tensorflow.keras.applications import (
     EfficientNetV2B0, EfficientNetV2B1, EfficientNetV2B2, EfficientNetV2B3
 )
 import config
-
 
 def get_backbone(backbone_name="MobileNetV2", input_shape=(192, 192, 3), alpha=1.0):
     """
@@ -40,6 +43,7 @@ def get_backbone(backbone_name="MobileNetV2", input_shape=(192, 192, 3), alpha=1
             include_top=False,
             weights=config.PRETRAINED_WEIGHTS,
             alpha=alpha,
+            include_preprocessing=True,
             minimalistic=False
         )
     elif backbone_name == "MobileNetV3Large":
@@ -47,6 +51,7 @@ def get_backbone(backbone_name="MobileNetV2", input_shape=(192, 192, 3), alpha=1
             input_shape=input_shape,
             include_top=False,
             weights=config.PRETRAINED_WEIGHTS,
+            include_preprocessing=True,
             alpha=alpha,
             minimalistic=False
         )
@@ -143,6 +148,63 @@ def get_backbone(backbone_name="MobileNetV2", input_shape=(192, 192, 3), alpha=1
     
     return backbone
 
+def get_head(num_keypoints=3, backbone_output=None, heatmaps=True, heatmap_size=(56, 56)):
+    """
+    Pose estimation head similar to DeepLabCut.
+    Args:
+        backbone_output: tf.Tensor, output from backbone feature extractor
+        n_landmarks: int, number of keypoints
+        heatmap_size: tuple, desired output heatmap size (H, W)
+    Returns:
+        heatmaps: tf.Tensor, shape [B, H, W, n_landmarks]
+    """
+
+    x = backbone_output
+
+    if not heatmaps:
+        # Head
+        x = tf.keras.layers.GlobalAveragePooling2D()(x)
+        x = tf.keras.layers.Dense(256, activation="relu")(x)
+        x = tf.keras.layers.Dropout(0.2)(x)
+
+        # 3 landmarks × (x, y)
+        outputs = tf.keras.layers.Dense(
+            config.NUM_KEYPOINTS * 2,
+            activation="sigmoid"  # normalized [0, 1]
+        )(x)
+        return outputs
+
+    for f in [256, 128, 64]:
+    # for f in [256, 256, 256]:
+        x = layers.Conv2DTranspose(f, 4, strides=2, padding="same")(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.ReLU()(x)
+
+    heatmaps = layers.Conv2D(
+        num_keypoints,
+        1,
+        padding="same",
+        name="heatmap_output"
+    )(x)
+    return heatmaps
+
+
+def heatmaps_to_coords(heatmaps):
+    # heatmaps: [B, H, W, n_landmarks]
+    coords = []
+    probs = []
+    for i in range(heatmaps.shape[-1]):
+        h = heatmaps[..., i]
+        max_val = tf.reduce_max(h, axis=[1, 2])
+        idx = tf.argmax(tf.reshape(h, [h.shape[0], -1]), axis=1)
+        y = idx // h.shape[2]
+        x = idx % h.shape[2]
+        coords.append(tf.stack([x, y], axis=-1))
+        probs.append(max_val)
+    coords = tf.stack(coords, axis=1)
+    probs = tf.stack(probs, axis=1)
+    return coords, probs
+
 
 def build_pose_model(num_keypoints=3, backbone_name="MobileNetV2", input_shape=(192, 192, 3)):
     """
@@ -161,70 +223,22 @@ def build_pose_model(num_keypoints=3, backbone_name="MobileNetV2", input_shape=(
     Returns:
         model: Modèle Keras compilé
     """
-    # 1. Créer l'entrée
     inputs = keras.Input(shape=input_shape, name="image_input")
     
-    # 2. Charger le backbone
     backbone = get_backbone(backbone_name, input_shape, config.ALPHA)
     
-    # GELER LE BACKBONE (fine-tuning uniquement de la tête)
     backbone.trainable = False
-    print(f"🔒 Backbone gelé - {sum([1 for l in backbone.layers if not l.trainable])} couches non-entraînables")
-    
-    # 3. Extraire les features du backbone
+
     x = backbone(inputs)
-    
-    # 4. Déterminer la forme de sortie du backbone pour adapter la tête
-    # La plupart des backbones réduisent par un facteur de 32
-    # Ex: 192/32=6x6, 224/32=7x7, 240/32=7.5≈8x8
-    reduction_ratio = config.BACKBONE_REDUCTION_RATIOS.get(backbone_name, 32)
-    backbone_output_size = input_shape[0] // reduction_ratio
-    
-    print(f"📐 Sortie backbone: ~{backbone_output_size}x{backbone_output_size}")
-    print(f"🎯 Cible heatmaps: {config.HEATMAP_SIZE[0]}x{config.HEATMAP_SIZE[1]}")
-    
-    # 5. Calculer le nombre d'upsampling nécessaires
-    # Pour passer de backbone_output_size à HEATMAP_SIZE (48x48)
-    # On fait 3 upsampling x2 : 6→12→24→48 ou 7→14→28→56 (puis on ajuste)
-    
-    # Première upsampling: x2
-    x = layers.Conv2DTranspose(256, (3, 3), strides=(2, 2), padding='same', name='upsample_1')(x)
-    x = layers.BatchNormalization(name='bn_1')(x)
-    x = layers.ReLU(name='relu_1')(x)
-    
-    # Deuxième upsampling: x2
-    x = layers.Conv2DTranspose(128, (3, 3), strides=(2, 2), padding='same', name='upsample_2')(x)
-    x = layers.BatchNormalization(name='bn_2')(x)
-    x = layers.ReLU(name='relu_2')(x)
-    
-    # Troisième upsampling: x2
-    x = layers.Conv2DTranspose(64, (3, 3), strides=(2, 2), padding='same', name='upsample_3')(x)
-    x = layers.BatchNormalization(name='bn_3')(x)
-    x = layers.ReLU(name='relu_3')(x)
-    
-    # 6. Ajuster à la taille exacte des heatmaps si nécessaire
-    # Utiliser Resizing pour garantir la taille exacte
-    current_size = backbone_output_size * 8  # Après 3 upsampling x2
-    if current_size != config.HEATMAP_SIZE[0]:
-        x = layers.Resizing(
-            config.HEATMAP_SIZE[0], 
-            config.HEATMAP_SIZE[1], 
-            interpolation='bilinear',
-            name='resize_to_heatmap_size'
-        )(x)
-        print(f"🔧 Redimensionnement: {current_size}x{current_size} → {config.HEATMAP_SIZE[0]}x{config.HEATMAP_SIZE[1]}")
-    
-    # 7. Couche finale pour prédire les heatmaps
-    # Conv2D avec activation sigmoid pour avoir des valeurs entre 0 et 1
-    outputs = layers.Conv2D(num_keypoints, (1, 1), padding='same', activation='sigmoid', name='heatmaps')(x)
-    
-    # 8. Créer le modèle
+
+    outputs = get_head(num_keypoints, x, heatmaps=True, heatmap_size=config.HEATMAP_SIZE)
+
     model = Model(inputs=inputs, outputs=outputs, name=f'pose_estimation_{backbone_name}')
     
     return model
 
 
-def compile_model(model, learning_rate=1e-4, optimizer_name='adam'):
+def compile_model(model, learning_rate=1e-4, optimizer_name='adam', loss="mse"):
     """
     Compile le modèle avec la loss et l'optimiseur
     
@@ -260,36 +274,13 @@ def create_model():
     
     Returns:
         model: Modèle Keras compilé et prêt à l'entraînement
-    """
-    print("=" * 60)
-    print("🏗️  CONSTRUCTION DU MODÈLE")
-    print("=" * 60)
-    
-    # 1. Construire le modèle
-    print(f"\n📐 Construction du modèle avec backbone: {config.BACKBONE}")
+    # """
     model = build_pose_model(
         num_keypoints=config.NUM_KEYPOINTS,
         backbone_name=config.BACKBONE,
         input_shape=config.INPUT_SHAPE
     )
-    
-    # 2. Compiler le modèle
-    print(f"⚙️  Compilation avec {config.OPTIMIZER}, lr={config.LEARNING_RATE}")
-    model = compile_model(
-        model,
-        learning_rate=config.LEARNING_RATE,
-        optimizer_name=config.OPTIMIZER
-    )
-    
-    # 3. Afficher le résumé
-    print(f"\n📊 Résumé du modèle:")
-    model.summary()
-    
-    print("\n✅ Modèle créé et compilé avec succès!")
-    print("=" * 60)
-    
     return model
-
 
 if __name__ == "__main__":
     # Test de la construction du modèle

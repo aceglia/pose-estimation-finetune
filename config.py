@@ -6,19 +6,10 @@ from datetime import datetime
 
 # Chemins
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LABELED_DATA_DIR = os.path.join(BASE_DIR, "labeled-data")
+prefix = "/mnt/c" if os.name == "posix" else "C:\\"
+LABELED_DATA_DIR = os.path.join(prefix, "Users", "neuromolity-lab", "Downloads", "PFE", "PFE", "JambeGaucheLabeled", "1-TouteLabeledGauche")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
-
-# Fonction pour créer le nom du dossier modèle
-def get_model_folder_name(backbone=None, timestamp=None):
-    """Génère le nom du dossier pour un modèle spécifique"""
-    if backbone is None:
-        backbone = BACKBONE
-    if timestamp is None:
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-
-    # Nettoyer le nom du backbone (enlever caractères spéciaux)
-    backbone_mapping = {
+backbone_mapping = {
         "MobileNetV2": "MNv2",
         "MobileNetV3Small": "MNv3S",
         "MobileNetV3Large": "MNv3L",
@@ -36,6 +27,16 @@ def get_model_folder_name(backbone=None, timestamp=None):
         "EfficientNetV2B2": "ENV2B2",
         "EfficientNetV2B3": "ENV2B3",
     }
+# Fonction pour créer le nom du dossier modèle
+def get_model_folder_name(backbone=None, timestamp=None):
+    """Génère le nom du dossier pour un modèle spécifique"""
+    if backbone is None:
+        backbone = BACKBONE
+    if timestamp is None:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+    # Nettoyer le nom du backbone (enlever caractères spéciaux)
+
     clean_backbone = backbone_mapping.get(backbone, backbone)
 
     return f"{clean_backbone}_{timestamp}"
@@ -44,7 +45,7 @@ def get_model_folder_name(backbone=None, timestamp=None):
 MODEL_DIR = None
 MODELS_DIR = None
 LOGS_DIR = None
-VIDEOS_DIR = None
+VIDEOS_DIR = LABELED_DATA_DIR = os.path.join(prefix, "Users", "neuromolity-lab", "Downloads", "PFE", "PFE", "JambeGaucheLabeled", "1-TouteLabeledGauche")
 
 def setup_model_directories(model_folder_name=None):
     """Configure les dossiers pour un modèle spécifique"""
@@ -79,9 +80,9 @@ KEYPOINT_INDICES = {
 }
 
 # Images
-IMAGE_SIZE = (192, 192)
+IMAGE_SIZE = (224, 224)
 INPUT_SHAPE = (*IMAGE_SIZE, 3)
-HEATMAP_SIZE = (48, 48)
+HEATMAP_SIZE = (56, 56)
 HEATMAP_SIGMA = 2.0
 NORMALIZE = True
 
@@ -90,11 +91,18 @@ TRAIN_SPLIT = 0.8
 BATCH_SIZE = 16
 EPOCHS = 100
 LEARNING_RATE = 1e-3
-OPTIMIZER = "adam"
-EARLY_STOPPING_PATIENCE = 15
+BACKBONE_LEARNING_RATE = 1e-4
+BACKBONE_TRAINABLE_LAYERS = 20
+HEAD_LEARNING_RATE = [0.005, 0.02, 
+0.002,
+0.001,
+]
+OPTIMIZER = "sgd"
+EARLY_STOPPING_PATIENCE = 50
 REDUCE_LR_PATIENCE = 5
 REDUCE_LR_FACTOR = 0.5
 RANDOM_SEED = 42
+MOMENTUM = 0.9
 
 # Modèle
 BACKBONE = "MobileNetV2"  # Par défaut: MobileNetV2 (rapide, léger, performant)
@@ -104,7 +112,7 @@ ALPHA = 1.0
 # Tailles d'images recommandées par backbone (pour performances optimales)
 BACKBONE_INPUT_SIZES = {
     "MobileNetV2": (192, 192),
-    "MobileNetV3Small": (192, 192),
+    "MobileNetV3Small": (224, 224),
     "MobileNetV3Large": (224, 224),
     "EfficientNetLite0": (224, 224),
     "EfficientNetLite1": (240, 240),

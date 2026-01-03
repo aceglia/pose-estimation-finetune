@@ -5,8 +5,24 @@ import os
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
+from ai_edge_litert.interpreter import Interpreter
 import config
 
+
+def extract_keypoints_from_heatmaps(heatmaps, frame_shape):
+    """Extrait les coordonnées des keypoints depuis les heatmaps"""
+    h, w = frame_shape[:2]
+    keypoints = []
+
+    for i in range(heatmaps.shape[-1]):
+        heatmap = heatmaps[:, :, i]
+        max_pos = np.unravel_index(heatmap.argmax(), heatmap.shape)
+        y = int(max_pos[0] * h / heatmap.shape[0])
+        x = int(max_pos[1] * w / heatmap.shape[1])
+        confidence = heatmap[max_pos]
+        keypoints.append({'x': x, 'y': y, 'confidence': confidence})
+
+    return keypoints
 
 def convert_to_tflite(model_path, output_path, quantize=True, quantization_type='int8', representative_dataset=None):
     """
@@ -42,9 +58,11 @@ def convert_to_tflite(model_path, output_path, quantize=True, quantization_type=
         if quantization_type == 'int8':
             print("\n⚙️  Configuration de la quantization INT8 optimisée...")
             converter.optimizations = [tf.lite.Optimize.DEFAULT]
+            converter.inference_input_type = tf.uint8
+            converter.inference_output_type = tf.uint8
             converter.target_spec.supported_ops = [
                 tf.lite.OpsSet.TFLITE_BUILTINS_INT8,
-                tf.lite.OpsSet.TFLITE_BUILTINS
+                tf.lite.OpsSet.TFLITE_BUILTINS,
             ]
             if representative_dataset is not None:
                 converter.representative_dataset = representative_dataset
@@ -107,7 +125,7 @@ def create_representative_dataset_generator(X_val, num_samples=100):
     return representative_dataset_gen
 
 
-def test_tflite_model(tflite_path, X_test, y_test, num_samples=10):
+def test_tflite_model(tflite_path, val_ds,  num_samples=10):
     """
     Teste le modèle TFLite et compare avec les prédictions originales
     
@@ -123,7 +141,7 @@ def test_tflite_model(tflite_path, X_test, y_test, num_samples=10):
     print("\n🧪 Test du modèle TFLite...")
     
     # Charger l'interpréteur TFLite
-    interpreter = tf.lite.Interpreter(model_path=tflite_path)
+    interpreter = Interpreter(model_path=tflite_path)
     interpreter.allocate_tensors()
     
     # Obtenir les détails des entrées/sorties
@@ -137,10 +155,25 @@ def test_tflite_model(tflite_path, X_test, y_test, num_samples=10):
     print(f"   - Output type: {output_details[0]['dtype']}")
     
     # Tester sur quelques échantillons
+    # get images and labels from test set
+    all_images = []
+    all_labels = []
+    for images, labels in X_test.unbatch().take(num_samples):
+        # images = tf.cast(images, tf.uint8)
+        images = np.array(images)[None, ...]
+        labels = (np.array(labels) * 255).astype(np.uint8)[None, ...] 
+        # convert all colors of heatmaps to red
+        # labels = np.stack([labels, labels, labels], axis=-1)
+        all_images.append(images)
+        all_labels.append(labels)
+    
     errors = []
-    for i in range(min(num_samples, len(X_test))):
+    for i in range(min(num_samples, len(all_images))):
         # Préparer l'entrée
-        input_data = X_test[i:i+1].astype(np.float32)
+        input_data = all_images[i].astype(np.float32)
+        input_data = tf.cast(input_data, tf.float32)
+        # normalize between -1 and 1
+        # input_data = (input_data / 127.5) - 1
         
         # Si le modèle attend des uint8, il faut quantizer l'entrée
         if input_details[0]['dtype'] == np.uint8:
@@ -160,8 +193,27 @@ def test_tflite_model(tflite_path, X_test, y_test, num_samples=10):
             output_data = (output_data.astype(np.float32) - output_zero_point) * output_scale
         
         # Calculer l'erreur
-        error = np.mean(np.abs(output_data - y_test[i:i+1]))
-        errors.append(error)
+        # error = np.mean(np.abs(output_data - all_labels[i]))
+        # # error in pixel 
+        # all_labels_pixel = all_labels[i] * input_data.shape[1]
+        # output_data_pixel = output_data * input_data.shape[1]
+        # error_pixel = np.mean(np.abs(output_data_pixel - all_labels_pixel))
+        # errors.append(error * 100)
+
+        # import cv2  
+        # # all_labels_pixel = all_labels_pixel.reshape(-1, 2)
+        # # output_data_pixel = output_data_pixel.reshape(-1, 2)
+        # val_resized = cv2.resize(all_labels[i][0], (all_images[0][0].shape[0], all_images[0][0].shape[0]))
+        # out_resized = cv2.resize((output_data[0] * 255).astype(np.uint8), (all_images[0][0].shape[0], all_images[0][0].shape[0]))
+        # to_show = np.array(input_data[0]).astype(np.uint8)
+        # # for label, output in zip(val_resized, out_resized):
+        # cv2.addWeighted(to_show, 0.5, val_resized, 0.5, 0, to_show)
+        # cv2.addWeighted(to_show, 0.5, out_resized, 0.5, 0, to_show)
+        # cv2.imshow(f"Input ({i})", to_show)
+        # cv2.waitKey(0)
+
+
+
     
     avg_error = np.mean(errors)
     print(f"\n📊 Résultats du test:")
@@ -171,7 +223,7 @@ def test_tflite_model(tflite_path, X_test, y_test, num_samples=10):
     return avg_error
 
 
-def export_model(model=None, model_path=None, X_val=None, model_name="pose_model", model_dir=None):
+def export_model(model_path=None, model_name="pose_model", model_dir=None, representative_ds=None):
     """
     Pipeline complet d'export du modèle en TFLite avec deux versions optimisées
     
@@ -192,29 +244,16 @@ def export_model(model=None, model_path=None, X_val=None, model_name="pose_model
     # Déterminer le dossier des modèles
     models_dir = config.MODELS_DIR if model_dir is None else os.path.join(model_dir, "models")
     
-    # Si un modèle Keras est fourni, le sauvegarder d'abord
-    if model is not None:
-        saved_model_dir = os.path.join(models_dir, f"{model_name}_for_export")
-        print(f"\n💾 Sauvegarde du modèle au format SavedModel...")
-        model.save(saved_model_dir, save_format='tf')
-        model_path = saved_model_dir
-    
-    if model_path is None:
-        raise ValueError("Vous devez fournir soit 'model' soit 'model_path'")
-    
     tflite_paths = {}
     
     # Créer le dataset représentatif si nécessaire
     representative_dataset = None
-    if X_val is not None:
-        num_calibration_samples = min(500, len(X_val))
-        print(f"\n📊 Création du dataset représentatif ({num_calibration_samples} échantillons)...")
-        representative_dataset = create_representative_dataset_generator(
-            X_val, 
-            num_samples=num_calibration_samples
-        )
-    
-    # Export 1: Modèle Dynamic Range Quantization (recommandé pour mobile)
+    if representative_ds is not None:
+        def representative_dataset():
+            for images, _ in representative_ds.unbatch().take(100):
+                # images = tf.cast(images, tf.uint8)
+                yield [tf.expand_dims(images, 0)]
+
     print("\n" + "=" * 40)
     print("📱 EXPORT 1/2 - DYNAMIC RANGE QUANTIZATION")
     print("=" * 40)
@@ -245,6 +284,22 @@ def export_model(model=None, model_path=None, X_val=None, model_name="pose_model
         representative_dataset=None
     )
     tflite_paths['float32'] = tflite_float32_path
+
+    # Export 3: Modèle int8 (smalest)
+    print("\n" + "=" * 40)
+    print("🔬 EXPORT 2/2 - FLOAT32 COMPLET")
+    print("=" * 40)
+    print("🎯 TESTS: Précision maximale (taille importante)")
+    
+    tflite_int8_path = os.path.join(models_dir, f"{model_name}_int8.tflite")
+    int8_size = convert_to_tflite(
+        model_path=model_path,
+        output_path=tflite_int8_path,
+        quantize=True,
+        quantization_type='int8',
+        representative_dataset=representative_dataset
+    )
+    tflite_paths['int8'] = tflite_int8_path
     
     print(f"\n✅ Exports terminés!")
     print(f"📱 Modèle Dynamic: {tflite_dynamic_path} ({dynamic_size:.1f} Ko)")

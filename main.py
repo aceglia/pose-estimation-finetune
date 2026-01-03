@@ -2,6 +2,11 @@
 Script principal pour le pipeline de fine-tuning
 """
 import os
+prefix = "/mnt/c" if os.name == "posix" else "C:"
+if not os.name == "posix":
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+# os.add_dll_directory(os.path.join(prefix, "Users", "neuromolity-lab", "miniconda3", "envs", "pose_est", "Library", "bin"))
+
 import argparse
 import numpy as np
 from datetime import datetime
@@ -10,6 +15,7 @@ from data_preprocessing import prepare_data
 from model import create_model
 from train import train_model, save_final_model, evaluate_model, plot_training_history
 from export_tflite import export_model, test_tflite_model
+
 
 
 def main(args):
@@ -26,92 +32,86 @@ def main(args):
             recommended_size = config.BACKBONE_INPUT_SIZES[args.backbone]
             config.IMAGE_SIZE = recommended_size
             config.INPUT_SHAPE = (*recommended_size, 3)
-            print(f"\n📦 Backbone: {args.backbone}")
-            print(f"📊 Taille d'image adaptée: {recommended_size[0]}x{recommended_size[1]}")
-    
-    print(f"\n🎯 Configuration:")
+    print(f"\nConfiguration:")
     print(f"   - Backbone: {config.BACKBONE}")
     print(f"   - Input size: {config.INPUT_SHAPE[0]}x{config.INPUT_SHAPE[1]}")
-    print(f"   - Heatmap size: {config.HEATMAP_SIZE[0]}x{config.HEATMAP_SIZE[1]}")
 
-    # ÉTAPE 0: Configuration des dossiers
-    print("\n📁 CONFIGURATION DES DOSSIERS")
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    model_folder_name = config.get_model_folder_name(config.BACKBONE, timestamp)
-    model_dir, models_dir, logs_dir, videos_dir = config.setup_model_directories(model_folder_name)
 
-    print(f"📂 Dossier modèle: {model_folder_name}")
-    print(f"   - Modèles: {models_dir}")
-    print(f"   - Logs: {logs_dir}")
-    print(f"   - Vidéos: {videos_dir}")
+    if not args.skip_training:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        model_folder_name = config.get_model_folder_name(config.BACKBONE, timestamp)
+        model_dir, models_dir, logs_dir, videos_dir = config.setup_model_directories(model_folder_name)
+    else:
+        if args.model_path is None:
+            raise ValueError("Vous devez fournir --model_path si --skip_training est activé")
+        models_dir = os.path.dirname(args.model_path)
+        model_dir = os.path.dirname(models_dir)
+        logs_dir = os.path.join(model_dir, "logs")
+        videos_dir = os.path.join(model_dir, "videos")
+        model_name = "pose_model"
+        model_path = args.model_path
 
     tflite_path = None  # Initialiser
-
-    # ÉTAPE 1: Préparation des données
     if not args.skip_data_prep:
-        print("\nÉTAPE 1/4 - PRÉPARATION DES DONNÉES")
-        X_train, X_val, y_train, y_val = prepare_data()
-
-        if args.save_data:
-            data_path = os.path.join(model_dir, "preprocessed_data.npz")
-            np.savez_compressed(data_path, X_train=X_train, X_val=X_val, y_train=y_train, y_val=y_val)
-            print(f"💾 Données sauvegardées: {data_path}")
-    else:
-        print("\n⏩ Chargement des données prétraitées...")
-        data_path = os.path.join(model_dir, "preprocessed_data.npz")
-        data = np.load(data_path)
-        X_train = data['X_train']
-        X_val = data['X_val']
-        y_train = data['y_train']
-        y_val = data['y_val']
-        print(f"✅ Données chargées depuis: {data_path}")
+        train_ds, val_ds = prepare_data()
+        print("Data set created")
+            
     
-    # ÉTAPE 2: Construction du modèle
     if not args.skip_training:
-        print("\nÉTAPE 2/4 - CONSTRUCTION DU MODÈLE")
         model = create_model()
+        print("Model created")
 
-        # ÉTAPE 3: Entraînement
-        print("\nÉTAPE 3/4 - ENTRAÎNEMENT")
         model_name = "pose_model"  # Nom simplifié car le dossier contient déjà la date/backbone
+        history_back, history_head = train_model(model=model, tf_data_set=(train_ds, val_ds), model_name=model_name, model_dir=model_dir)
+        print("Model trained")
 
-        history = train_model(model=model, X_train=X_train, y_train=y_train, X_val=X_val, y_val=y_val, model_name=model_name, model_dir=model_dir)
         final_model_path, saved_model_dir = save_final_model(model, model_name, model_dir)
-        metrics = evaluate_model(model, X_val, y_val)
-
-        if args.plot_history:
-            plot_path = os.path.join(logs_dir, f"{model_name}_history.png")
-            plot_training_history(history, save_path=plot_path)
-    else:
-        print("\n⏩ Chargement du modèle entraîné...")
-        model_path = args.model_path
-        if not model_path:
-            raise ValueError("Vous devez fournir --model_path si --skip_training est activé")
-        saved_model_dir = model_path
-        model_name = "pose_model"
-        print(f"✅ Modèle chargé depuis: {saved_model_dir}")
-
-    # ÉTAPE 4: Export TFLite
-    tflite_paths = None
-    if not args.skip_export:
-        print("\nÉTAPE 4/4 - EXPORT TENSORFLOW LITE")
-        tflite_paths = export_model(model_path=saved_model_dir, X_val=X_val, model_name=model_name, model_dir=model_dir)
-
-        if args.test_tflite:
-            # Tester le modèle recommandé (dynamic)
-            test_tflite_model(tflite_paths['dynamic'], X_val, y_val, num_samples=10)
+        print("Model_saved")
     
-    # Résumé final
-    print("\n" + "=" * 60)
-    print("🎉 PIPELINE TERMINÉ AVEC SUCCÈS!")
-    print("=" * 60)
-    print(f"\n📂 Résultats sauvegardés dans: {model_dir}")
-    print(f"   - Modèles: {models_dir}")
-    print(f"   - Logs: {logs_dir}")
-    print(f"   - Vidéos: {videos_dir}")
+    if args.plot_history:
+        name = ["backbone", "head"]
+        for h, hist in enumerate([ history_back, history_head]):
+            plot_path = os.path.join(logs_dir, f"{model_name}_{name[h]}_history.png")
+            plot_training_history(hist, save_path=plot_path)
+    
+    # import tensorflow as tf
+    # # model_path = r"C:\Users\neuromolity-lab\Documents\amedeo\pose-estimation-finetune\output\MNv3S_20251231_123442\models\pose_model_final.h5"
+    # # model = tf.keras.models.load_model(model_path)
+    # # model = tf.saved_model.load(saved_model_dir)
+    # import tensorflow as tf
+    # img, gt_heatmaps = next(iter(X_val.take(1)))
+    # # img = img[8]
+    # y_pred = model.predict(img)
+    # print("logits:", tf.reduce_min(y_pred), tf.reduce_max(y_pred))
+    # print("sigmoid max:", tf.reduce_max(tf.sigmoid(y_pred)))
+    # sig = tf.sigmoid(y_pred).numpy()[0]
+    # scale = config.INPUT_SHAPE[0] // config.HEATMAP_SIZE[0]
+    # coords = [np.array(np.where(sig[:, :, i] == np.max(sig[:, :, i]))).flatten() * scale for i in range(sig.shape[-1])]
+    # gt_coords = from_heatmaps_to_coords(gt_heatmaps, from_prediction=False)
+    # pr_coords = from_heatmaps_to_coords(y_pred, from_prediction=True)
+    # import matplotlib.pyplot as plt
+    # import cv2
+    # gt_coords = gt_coords[0]
+    # pr_coords = pr_coords[0]
+    # img = img[0]
+    # img = img.numpy().astype(np.uint8)
+    
+    # heatmap = np.clip(y_pred[0], 0, 1)
+    # heatmap = cv2.applyColorMap(
+    #         (heatmap * 255).astype(np.uint8),
+    #         cv2.COLORMAP_JET
+    #     )
+    # heatmaps = cv2.resize(heatmap, (int(img.shape[0]), int(img.shape[1])))
+    # img = cv2.addWeighted(img,  0.5, heatmaps, 0.5, 0)
+    # [plt.scatter(gt_coords[1, i], gt_coords[0, i], color="r") for i in range(gt_coords.shape[-1])]
+    # [plt.scatter(pr_coords[1, i], pr_coords[0, i], color="b", s=10) for i in range(pr_coords.shape[-1])]
+    # plt.imshow(img)
 
-    print("\n" + "=" * 60)
+    if not args.skip_export:
+        tflite_paths = export_model(model_path=saved_model_dir, model_name=model_name, model_dir=model_dir, representative_ds=val_ds)
 
+    if args.test_tflite:
+        test_tflite_model(model_path.replace("final.keras", "dynamic.tflite"), val_ds=val_ds, num_samples=10)
 
 def parse_arguments():
     """
@@ -142,7 +142,7 @@ def parse_arguments():
     parser.add_argument(
         '--backbone',
         type=str,
-        default=None,
+        default="MobileNetV3Small",
         choices=[
             'MobileNetV2', 'MobileNetV3Small', 'MobileNetV3Large',
             'EfficientNetLite0', 'EfficientNetLite1', 'EfficientNetLite2', 
@@ -150,7 +150,7 @@ def parse_arguments():
             'EfficientNetB0', 'EfficientNetB1', 'EfficientNetB2', 'EfficientNetB3',
             'EfficientNetV2B0', 'EfficientNetV2B1', 'EfficientNetV2B2', 'EfficientNetV2B3'
         ],
-        help="Backbone à utiliser (défaut: MobileNetV2)"
+        help="Backbone à utiliser (défaut: MobileNetV3Small)"
     )
     
     # Options de sauvegarde
@@ -184,9 +184,14 @@ def parse_arguments():
 
 
 if __name__ == "__main__":
+    import os
+    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
     # Parser les arguments
     args = parse_arguments()
-    
+    # args.skip_training = True
+    # # args.skip_export = True
+    # args.model_path = r"/mnt/c/Users/neuromolity-lab/Documents/amedeo/pose-estimation-finetune/output/MNv3S_20260102_103228/models/pose_model_final.keras"
+
     # Lancer le pipeline
     try:
         main(args)
