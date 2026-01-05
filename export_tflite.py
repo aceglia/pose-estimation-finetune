@@ -24,7 +24,7 @@ def extract_keypoints_from_heatmaps(heatmaps, frame_shape):
 
     return keypoints
 
-def convert_to_tflite(model_path, output_path, quantize=True, quantization_type='int8', representative_dataset=None):
+def convert_to_tflite(model, output_path, quantize=True, quantization_type='int8', representative_dataset=None):
     """
     Convertit un modèle Keras en TensorFlow Lite
     
@@ -38,25 +38,12 @@ def convert_to_tflite(model_path, output_path, quantize=True, quantization_type=
     Returns:
         tflite_model_size: Taille du modèle en Ko
     """
-    print("=" * 60)
-    print("📦 CONVERSION EN TENSORFLOW LITE")
-    print("=" * 60)
-    
-    # Charger le modèle
-    print(f"\n📂 Chargement du modèle depuis: {model_path}")
-    
-    # Créer le converter
-    if model_path.endswith('.h5'):
-        model = keras.models.load_model(model_path)
-        converter = tf.lite.TFLiteConverter.from_keras_model(model)
-    else:
-        # SavedModel format
-        converter = tf.lite.TFLiteConverter.from_saved_model(model_path)
+    converter = tf.lite.TFLiteConverter.from_keras_model(model)
     
     # Configuration du converter selon le type de quantization
     if quantize:
         if quantization_type == 'int8':
-            print("\n⚙️  Configuration de la quantization INT8 optimisée...")
+            print("\nConfiguration de la quantization INT8 optimisée...")
             converter.optimizations = [tf.lite.Optimize.DEFAULT]
             converter.inference_input_type = tf.uint8
             converter.inference_output_type = tf.uint8
@@ -68,13 +55,15 @@ def convert_to_tflite(model_path, output_path, quantize=True, quantization_type=
                 converter.representative_dataset = representative_dataset
                 
         elif quantization_type == 'float16':
-            print("\n⚙️  Configuration de la quantization FLOAT16 (haute précision)...")
+            print("\nConfiguration de la quantization FLOAT16 (haute précision)...")
             converter.optimizations = [tf.lite.Optimize.DEFAULT]
             converter.target_spec.supported_types = [tf.float16]
             
         elif quantization_type == 'dynamic':
-            print("\n⚙️  Configuration de la quantization dynamique (range-based)...")
+            print("\nConfiguration de la quantization dynamique (range-based)...")
             converter.optimizations = [tf.lite.Optimize.DEFAULT]
+            if representative_dataset is not None:
+                converter.representative_dataset = representative_dataset
             # Les poids sont quantizés dynamiquement, entrées/sorties restent float32
             
         else:
@@ -83,7 +72,7 @@ def convert_to_tflite(model_path, output_path, quantize=True, quantization_type=
         print("\n⚙️  Pas de quantization (modèle float32 complet)")
     
     # Convertir
-    print("\n🔄 Conversion en cours...")
+    print("\nConversion en cours...")
     tflite_model = converter.convert()
     
     # Sauvegarder
@@ -158,7 +147,7 @@ def test_tflite_model(tflite_path, val_ds,  num_samples=10):
     # get images and labels from test set
     all_images = []
     all_labels = []
-    for images, labels in X_test.unbatch().take(num_samples):
+    for images, labels in val_ds.unbatch().take(num_samples):
         # images = tf.cast(images, tf.uint8)
         images = np.array(images)[None, ...]
         labels = (np.array(labels) * 255).astype(np.uint8)[None, ...] 
@@ -178,7 +167,8 @@ def test_tflite_model(tflite_path, val_ds,  num_samples=10):
         # Si le modèle attend des uint8, il faut quantizer l'entrée
         if input_details[0]['dtype'] == np.uint8:
             input_scale, input_zero_point = input_details[0]['quantization']
-            input_data = (input_data / input_scale + input_zero_point).astype(np.uint8)
+            input_data = (input_data / input_scale + input_zero_point)
+            input_data = tf.cast(input_data, tf.uint8)
         
         # Inférence
         interpreter.set_tensor(input_details[0]['index'], input_data)
@@ -191,7 +181,7 @@ def test_tflite_model(tflite_path, val_ds,  num_samples=10):
         if output_details[0]['dtype'] == np.uint8:
             output_scale, output_zero_point = output_details[0]['quantization']
             output_data = (output_data.astype(np.float32) - output_zero_point) * output_scale
-        
+
         # Calculer l'erreur
         # error = np.mean(np.abs(output_data - all_labels[i]))
         # # error in pixel 
@@ -199,31 +189,12 @@ def test_tflite_model(tflite_path, val_ds,  num_samples=10):
         # output_data_pixel = output_data * input_data.shape[1]
         # error_pixel = np.mean(np.abs(output_data_pixel - all_labels_pixel))
         # errors.append(error * 100)
-
-        # import cv2  
-        # # all_labels_pixel = all_labels_pixel.reshape(-1, 2)
-        # # output_data_pixel = output_data_pixel.reshape(-1, 2)
-        # val_resized = cv2.resize(all_labels[i][0], (all_images[0][0].shape[0], all_images[0][0].shape[0]))
-        # out_resized = cv2.resize((output_data[0] * 255).astype(np.uint8), (all_images[0][0].shape[0], all_images[0][0].shape[0]))
-        # to_show = np.array(input_data[0]).astype(np.uint8)
-        # # for label, output in zip(val_resized, out_resized):
-        # cv2.addWeighted(to_show, 0.5, val_resized, 0.5, 0, to_show)
-        # cv2.addWeighted(to_show, 0.5, out_resized, 0.5, 0, to_show)
-        # cv2.imshow(f"Input ({i})", to_show)
-        # cv2.waitKey(0)
-
-
-
     
-    avg_error = np.mean(errors)
-    print(f"\n📊 Résultats du test:")
-    print(f"   - Nombre d'échantillons testés: {len(errors)}")
-    print(f"   - Erreur moyenne (MAE): {avg_error:.6f}")
     
-    return avg_error
+    # return avg_error
 
 
-def export_model(model_path=None, model_name="pose_model", model_dir=None, representative_ds=None):
+def export_model(model, model_name="pose_model", model_dir=None, representative_ds=None):
     """
     Pipeline complet d'export du modèle en TFLite avec deux versions optimisées
     
@@ -237,9 +208,6 @@ def export_model(model_path=None, model_name="pose_model", model_dir=None, repre
     Returns:
         tflite_paths: Dictionnaire avec les chemins des modèles exportés
     """
-    print("=" * 60)
-    print("🚀 EXPORT DU MODÈLE EN TENSORFLOW LITE")
-    print("=" * 60)
     
     # Déterminer le dossier des modèles
     models_dir = config.MODELS_DIR if model_dir is None else os.path.join(model_dir, "models")
@@ -249,9 +217,9 @@ def export_model(model_path=None, model_name="pose_model", model_dir=None, repre
     # Créer le dataset représentatif si nécessaire
     representative_dataset = None
     if representative_ds is not None:
-        def representative_dataset():
+        def representative_dataset_gen():
             for images, _ in representative_ds.unbatch().take(100):
-                # images = tf.cast(images, tf.uint8)
+                images = tf.cast(images, tf.float32)
                 yield [tf.expand_dims(images, 0)]
 
     print("\n" + "=" * 40)
@@ -261,7 +229,7 @@ def export_model(model_path=None, model_name="pose_model", model_dir=None, repre
     
     tflite_dynamic_path = os.path.join(models_dir, f"{model_name}_dynamic.tflite")
     dynamic_size = convert_to_tflite(
-        model_path=model_path,
+        model=model,
         output_path=tflite_dynamic_path,
         quantize=True,
         quantization_type='dynamic',
@@ -277,7 +245,7 @@ def export_model(model_path=None, model_name="pose_model", model_dir=None, repre
     
     tflite_float32_path = os.path.join(models_dir, f"{model_name}_float32.tflite")
     float32_size = convert_to_tflite(
-        model_path=model_path,
+        model=model,
         output_path=tflite_float32_path,
         quantize=False,
         quantization_type='none',
@@ -293,11 +261,11 @@ def export_model(model_path=None, model_name="pose_model", model_dir=None, repre
     
     tflite_int8_path = os.path.join(models_dir, f"{model_name}_int8.tflite")
     int8_size = convert_to_tflite(
-        model_path=model_path,
+        model=model,
         output_path=tflite_int8_path,
         quantize=True,
         quantization_type='int8',
-        representative_dataset=representative_dataset
+        representative_dataset=representative_dataset_gen
     )
     tflite_paths['int8'] = tflite_int8_path
     

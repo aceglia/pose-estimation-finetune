@@ -83,21 +83,21 @@ KEYPOINT_INDICES = {
 IMAGE_SIZE = (224, 224)
 INPUT_SHAPE = (*IMAGE_SIZE, 3)
 HEATMAP_SIZE = (56, 56)
-HEATMAP_SIGMA = 2.0
+HEATMAP_SIGMA = 3.0
 NORMALIZE = True
 
 # Entraînement
-TRAIN_SPLIT = 0.8
-BATCH_SIZE = 16
+TRAIN_SPLIT = 0.9
+BATCH_SIZE = 32
 EPOCHS = 100
 LEARNING_RATE = 1e-3
-BACKBONE_LEARNING_RATE = 1e-4
+BACKBONE_LEARNING_RATE = 1e-6
 BACKBONE_TRAINABLE_LAYERS = 20
-HEAD_LEARNING_RATE = [0.005, 0.02, 
+HEAD_LEARNING_RATE = [0.00005, 0.02, 
 0.002,
 0.001,
 ]
-OPTIMIZER = "sgd"
+OPTIMIZER = "adam"
 EARLY_STOPPING_PATIENCE = 50
 REDUCE_LR_PATIENCE = 5
 REDUCE_LR_FACTOR = 0.5
@@ -107,7 +107,7 @@ MOMENTUM = 0.9
 # Modèle
 BACKBONE = "MobileNetV2"  # Par défaut: MobileNetV2 (rapide, léger, performant)
 PRETRAINED_WEIGHTS = "imagenet"
-ALPHA = 1.0
+ALPHA = 0.75
 
 # Tailles d'images recommandées par backbone (pour performances optimales)
 BACKBONE_INPUT_SIZES = {
@@ -152,16 +152,5 @@ BACKBONE_REDUCTION_RATIOS = {
 # Export TFLite
 TFLITE_QUANTIZATION = True
 TFLITE_MODEL_NAME = "pose_model_quantized.tflite"
-
-# Augmentation
-USE_AUGMENTATION = True
-AUGMENTATION_CONFIG = {
-    "rotation_range": 15,
-    "width_shift_range": 0.1,
-    "height_shift_range": 0.1,
-    "zoom_range": 0.1,
-    "horizontal_flip": True,
-    "fill_mode": "nearest"
-}
 
 VERBOSE = 1

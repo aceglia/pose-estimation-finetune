@@ -93,7 +93,7 @@ def train_model(model, tf_data_set=None, model_name="pose_model", model_dir=None
     """
     loss_fn = tf.keras.losses.BinaryFocalCrossentropy(
         from_logits=True, 
-        gamma=2.0,
+        gamma=1.0,
         apply_class_balancing=True 
     )    
 
@@ -101,7 +101,6 @@ def train_model(model, tf_data_set=None, model_name="pose_model", model_dir=None
     history_head = {"loss":[], 
                     "val_loss":[],
                     "lr":[]}
-    
     for learning_rate in config.HEAD_LEARNING_RATE[0:1]: 
         print("Training the head layers first...")
         if config.OPTIMIZER == 'adam':
@@ -111,13 +110,13 @@ def train_model(model, tf_data_set=None, model_name="pose_model", model_dir=None
         model.compile(
             optimizer=optimizer,
             loss=loss_fn,
-            metrics=["mae"]
+            metrics=[]
         )
         model.summary()
-        history = model.fit(train.repeat(), epochs=150, verbose=1,
+        history = model.fit(train.repeat(), epochs=400, verbose=1,
                                 validation_data=val.repeat(),
-                                validation_steps=4,
-                                steps_per_epoch=24,
+                                validation_steps=val.cardinality().numpy(),
+                                steps_per_epoch=train.cardinality().numpy(),
                                     callbacks=create_callbacks(model_name, model_dir, backbone=False))
         history_head["loss"].extend(history.history["loss"])
         history_head["val_loss"].extend(history.history["val_loss"])
@@ -132,24 +131,32 @@ def train_model(model, tf_data_set=None, model_name="pose_model", model_dir=None
     # create new model with trained data
     # print("Head layers trained. Now fine tuning the backbone...")
     # # fine tune backbone
-    # model.get_layer('MobileNetV3Small').trainable = True
-    # if config.OPTIMIZER == 'adam':
-    #     optimizer = keras.optimizers.Adam(learning_rate=config.BACKBONE_LEARNING_RATE)   
-    # elif config.OPTIMIZER == 'sgd':
-    #     optimizer = keras.optimizers.SGD(learning_rate=config.BACKBONE_LEARNING_RATE, momentum=config.MOMENTUM)
-    # model.compile(
-    #     optimizer=optimizer,
-    #     loss=loss_fn,
-    #     metrics=["mae"]
-    # )
-    # model.summary()
-    # history = model.fit(train, epochs=20, verbose=1, validation_data=val,
-    #                     # validation_steps=2,
-    #                     #       steps_per_epoch=12,
-    #                      callbacks=create_callbacks(model_name, model_dir, backbone=True))
-    # # history_head = model.fit(train, steps_per_epoch=1, epochs=100, verbose=1)
+    model.get_layer('MobileNetV3Small').trainable = True
+    if config.OPTIMIZER == 'adam':
+        optimizer = keras.optimizers.Adam(learning_rate=config.BACKBONE_LEARNING_RATE)   
+    elif config.OPTIMIZER == 'sgd':
+        optimizer = keras.optimizers.SGD(learning_rate=config.BACKBONE_LEARNING_RATE, momentum=config.MOMENTUM)
+    model.compile(
+        optimizer=optimizer,
+        loss=loss_fn,
+        metrics=["mae"]
+    )
+    model.summary()
+    history_back = {"loss":[], 
+                    "val_loss":[],
+                    "lr":[]}
+    history = model.fit(train.repeat(), epochs=1000, verbose=1,
+                                validation_data=val.repeat(),
+                                validation_steps=val.cardinality().numpy(),
+                                steps_per_epoch=train.cardinality().numpy(),
+                         callbacks=create_callbacks(model_name, model_dir, backbone=True))
+    history_back["loss"].extend(history.history["loss"])
+    history_back["val_loss"].extend(history.history["val_loss"])
+
+    history_back["lr"].extend([learning_rate]* len(history.history["loss"]))
+    # history_head = model.fit(train, steps_per_epoch=1, epochs=100, verbose=1)
     # print(history.history)
-    return history, history_head
+    return history_back, history_head
 
 
 def save_final_model(model, model_name="pose_model", model_dir=None):

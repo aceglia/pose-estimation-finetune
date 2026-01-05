@@ -70,8 +70,9 @@ def create_tf_dataset(annotations):
     data_set_size = len(image_paths)
     train_size = int(data_set_size * config.TRAIN_SPLIT)
     random_seed = config.RANDOM_SEED
-    random_train_idx = np.random.RandomState(random_seed).permutation(data_set_size)[:train_size]
-    random_val_idx = np.where(np.logical_not(np.isin(np.arange(data_set_size), random_train_idx)))[0]
+    all_idxs = np.random.RandomState(random_seed).permutation(data_set_size)
+    random_train_idx = all_idxs[:train_size]
+    random_val_idx = np.random.RandomState(random_seed).permutation(data_set_size)[train_size:]
 
     train_img_paths = tf.constant(image_paths[random_train_idx])
     train_landmarks = tf.constant(landmarks[random_train_idx])
@@ -92,14 +93,14 @@ def create_tf_dataset(annotations):
         .map(augment, num_parallel_calls=tf.data.AUTOTUNE)
         .map(preprocess_common, num_parallel_calls=tf.data.AUTOTUNE)
         .batch(config.BATCH_SIZE, drop_remainder=True)
-        .prefetch(tf.data.AUTOTUNE)
+        # .prefetch(tf.data.AUTOTUNE)
     )
     val_dataset = (
         val_ds
         .map(decode_image, num_parallel_calls=tf.data.AUTOTUNE)
         .map(preprocess_common, num_parallel_calls=tf.data.AUTOTUNE)
         .batch(config.BATCH_SIZE, drop_remainder=False)
-        .prefetch(tf.data.AUTOTUNE)
+        # .prefetch(tf.data.AUTOTUNE)
     )
     # count = 0
     # for img_path, lbl_path in zip(image_paths[random_val_idx], landmarks[random_val_idx]):
@@ -126,7 +127,7 @@ def prepare_data():
     if len(annotations) == 0:
         raise ValueError("Aucune annotation trouvée!")
     
-    train_dataset, val_dataset = create_tf_dataset(annotations, config.IMAGE_SIZE)
+    train_dataset, val_dataset = create_tf_dataset(annotations)
     return train_dataset, val_dataset
 
 

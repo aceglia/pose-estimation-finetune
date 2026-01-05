@@ -13,16 +13,14 @@ from datetime import datetime
 import config
 from data_preprocessing import prepare_data
 from model import create_model
-from train import train_model, save_final_model, evaluate_model, plot_training_history
+from train import train_model, save_final_model, plot_training_history
 from export_tflite import export_model, test_tflite_model
+from validation_utils import plot_validation_images
+import tensorflow as tf
 
 
 
 def main(args):
-    """Pipeline complet de fine-tuning"""
-    print("\n" + "=" * 60)
-    print("🎯 PIPELINE DE FINE-TUNING - POSE ESTIMATION")
-    print("=" * 60)
 
     # Configurer le backbone si spécifié en argument
     if args.backbone:
@@ -56,7 +54,6 @@ def main(args):
         train_ds, val_ds = prepare_data()
         print("Data set created")
             
-    
     if not args.skip_training:
         model = create_model()
         print("Model created")
@@ -74,44 +71,17 @@ def main(args):
             plot_path = os.path.join(logs_dir, f"{model_name}_{name[h]}_history.png")
             plot_training_history(hist, save_path=plot_path)
     
-    # import tensorflow as tf
-    # # model_path = r"C:\Users\neuromolity-lab\Documents\amedeo\pose-estimation-finetune\output\MNv3S_20251231_123442\models\pose_model_final.h5"
-    # # model = tf.keras.models.load_model(model_path)
-    # # model = tf.saved_model.load(saved_model_dir)
-    # import tensorflow as tf
-    # img, gt_heatmaps = next(iter(X_val.take(1)))
-    # # img = img[8]
-    # y_pred = model.predict(img)
-    # print("logits:", tf.reduce_min(y_pred), tf.reduce_max(y_pred))
-    # print("sigmoid max:", tf.reduce_max(tf.sigmoid(y_pred)))
-    # sig = tf.sigmoid(y_pred).numpy()[0]
-    # scale = config.INPUT_SHAPE[0] // config.HEATMAP_SIZE[0]
-    # coords = [np.array(np.where(sig[:, :, i] == np.max(sig[:, :, i]))).flatten() * scale for i in range(sig.shape[-1])]
-    # gt_coords = from_heatmaps_to_coords(gt_heatmaps, from_prediction=False)
-    # pr_coords = from_heatmaps_to_coords(y_pred, from_prediction=True)
-    # import matplotlib.pyplot as plt
-    # import cv2
-    # gt_coords = gt_coords[0]
-    # pr_coords = pr_coords[0]
-    # img = img[0]
-    # img = img.numpy().astype(np.uint8)
-    
-    # heatmap = np.clip(y_pred[0], 0, 1)
-    # heatmap = cv2.applyColorMap(
-    #         (heatmap * 255).astype(np.uint8),
-    #         cv2.COLORMAP_JET
-    #     )
-    # heatmaps = cv2.resize(heatmap, (int(img.shape[0]), int(img.shape[1])))
-    # img = cv2.addWeighted(img,  0.5, heatmaps, 0.5, 0)
-    # [plt.scatter(gt_coords[1, i], gt_coords[0, i], color="r") for i in range(gt_coords.shape[-1])]
-    # [plt.scatter(pr_coords[1, i], pr_coords[0, i], color="b", s=10) for i in range(pr_coords.shape[-1])]
-    # plt.imshow(img)
+    if args.skip_training:
+        model = tf.keras.models.load_model(model_path)
+    if args.skip_data_prep:
+        train_ds, val_ds = prepare_data()
+    plot_validation_images(model, val_ds, model_dir)
 
     if not args.skip_export:
-        tflite_paths = export_model(model_path=saved_model_dir, model_name=model_name, model_dir=model_dir, representative_ds=val_ds)
+        tflite_paths = export_model(model = model, model_name=model_name, model_dir=model_dir, representative_ds=val_ds)
 
-    if args.test_tflite:
-        test_tflite_model(model_path.replace("final.keras", "dynamic.tflite"), val_ds=val_ds, num_samples=10)
+    # if args.test_tflite:
+    #     test_tflite_model(model_path.replace("final.keras", "dynamic.tflite"), val_ds=val_ds, num_samples=10)
 
 def parse_arguments():
     """
@@ -136,6 +106,11 @@ def parse_arguments():
         '--skip-export',
         action='store_true',
         help="Sauter l'export TFLite"
+    )
+    parser.add_argument(
+        '--plot-validation',
+        action='store_true',
+        help="plot image after prediction on the validation dataset"
     )
     
     # Configuration du modèle
@@ -171,7 +146,7 @@ def parse_arguments():
         default=True,
         help="Tester le modèle TFLite après conversion"
     )
-    
+
     # Chemins
     parser.add_argument(
         '--model-path',
@@ -196,8 +171,8 @@ if __name__ == "__main__":
     try:
         main(args)
     except KeyboardInterrupt:
-        print("\n\n⚠️  Pipeline interrompu par l'utilisateur")
+        print("\n\nPipeline interrompu par l'utilisateur")
     except Exception as e:
-        print(f"\n\n❌ Erreur lors de l'exécution du pipeline:")
+        print(f"\n\nErreur lors de l'exécution du pipeline:")
         print(f"   {type(e).__name__}: {e}")
         raise

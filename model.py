@@ -174,8 +174,8 @@ def get_head(num_keypoints=3, backbone_output=None, heatmaps=True, heatmap_size=
         )(x)
         return outputs
 
-    for f in [256, 128, 64]:
-    # for f in [256, 256, 256]:
+    # for f in [256, 128, 64]:
+    for f in [256, 256, 256]:
         x = layers.Conv2DTranspose(f, 4, strides=2, padding="same")(x)
         x = layers.BatchNormalization()(x)
         x = layers.ReLU()(x)
