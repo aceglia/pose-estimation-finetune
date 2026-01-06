@@ -2,15 +2,14 @@
 Script d'entraînement du modèle de pose estimation
 """
 import os
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
 
-from datetime import datetime
 import tensorflow as tf
 from tensorflow import keras
 import config
+import numpy as np
 
 
-def create_callbacks(model_name="pose_model", model_dir=None, backbone=True):
+def create_callbacks(model_name="pose_model", model_dir=None, backbone=True, freq_save=1, checkpoint_suffix=""):
     """
     Crée les callbacks pour l'entraînement
     
@@ -24,6 +23,8 @@ def create_callbacks(model_name="pose_model", model_dir=None, backbone=True):
     # Déterminer les dossiers
     models_dir = config.MODELS_DIR if model_dir is None else os.path.join(model_dir, "models")
     logs_dir = config.LOGS_DIR if model_dir is None else os.path.join(model_dir, "logs")
+    checkpoints_dir = os.path.join(models_dir, "checkpoints")
+    os.makedirs(checkpoints_dir, exist_ok=True)
     suff = "backbone" if backbone else "head"
     
     callbacks = []
@@ -71,15 +72,49 @@ def create_callbacks(model_name="pose_model", model_dir=None, backbone=True):
     #     write_images=False
     # )
     # callbacks.append(tensorboard)
-    
+    checkpoint = tf.keras.callbacks.ModelCheckpoint(
+    os.path.join(model_dir, f"model_{checkpoint_suffix}" + "_checkpoint_{epoch:03d}.keras"),
+    save_freq=freq_save,
+    )
+    callbacks.append(checkpoint)
+
     # 5. CSVLogger - Sauvegarde les métriques dans un CSV
     csv_path = os.path.join(logs_dir, f"{model_name}_{suff}_training_log.csv")
     csv_logger = tf.keras.callbacks.CSVLogger(csv_path, append=True)
     callbacks.append(csv_logger)
     return callbacks
 
+def check_previous_checkpoints(model_dir, model_name):
+    model_name = "model_pose"
+    checkpoints_path = os.path.join(model_dir, "checkpoints")
+    if not os.path.exists(checkpoints_path):
+        return None, 0
+    checkpoint_files = os.listdir(checkpoints_path)
+    # find last checkpoint file of the format model_name_checkpoint_*.keras using re
+    import re
+    pattern = re.compile(f"{model_name}_head_checkpoint_(\d+).keras")
+    checkpoint_nums = [int(pattern.search(f).group(1)) for f in checkpoint_files if pattern.search(f)]
+    if not checkpoint_nums:
+        return None, 0
+    model = None
+    for check in -np.sort(-np.array(checkpoint_nums)):
+        try:
+            model = tf.keras.models.load_model(os.path.join(checkpoints_path, f"{model_name}_head_checkpoint_{check}.keras"))
+            break
+        except:
+            print("Existing checkpoints found but unable to load the model." \
+            "Trying the previous one...")
+    if model is None:
+        return None, 0
+    
+    return model, check
+    
 
-def train_model(model, tf_data_set=None, model_name="pose_model", model_dir=None):
+def train_model(model, 
+                tf_data_set=None,
+                model_name="pose_model",
+                model_dir=None,
+                      ):
     """
     Entraîne le modèle avec les callbacks appropriés
     
@@ -93,95 +128,56 @@ def train_model(model, tf_data_set=None, model_name="pose_model", model_dir=None
     """
     loss_fn = tf.keras.losses.BinaryFocalCrossentropy(
         from_logits=True, 
-        gamma=1.0,
+        gamma=2.0,
         apply_class_balancing=True 
     )    
-
     train, val = tf_data_set
-    history_head = {"loss":[], 
-                    "val_loss":[],
-                    "lr":[]}
-    for learning_rate in config.HEAD_LEARNING_RATE[0:1]: 
-        print("Training the head layers first...")
-        if config.OPTIMIZER == 'adam':
-            optimizer = keras.optimizers.Adam(learning_rate=learning_rate)   
-        elif config.OPTIMIZER == 'sgd':
-            optimizer = keras.optimizers.SGD(learning_rate=learning_rate, momentum=config.MOMENTUM)
-        model.compile(
-            optimizer=optimizer,
-            loss=loss_fn,
-            metrics=[]
-        )
+    config_dict = config.__dict__
+    histories = []
+    for training in ["head", "backbone"]:
+        model_prev, prev_epochs = check_previous_checkpoints(model_dir, model_name + f"_{training}")
+        if model_prev is None:
+            if training == "backbone":
+                nb_layers = config.BACKBONE_TRAINABLE_LAYERS if config.BACKBONE_TRAINABLE_LAYERS else len(model.get_layer('MobileNetV3Small').layers)
+                start_layer = len(model.get_layer('MobileNetV3Small').layers) - nb_layers
+                for l, layer in enumerate(model.get_layer('MobileNetV3Small').layers):
+                    if l >= start_layer:
+                        if not isinstance(layer, tf.keras.layers.BatchNormalization):
+                            layer.trainable = True
+
+            history_dict = {"loss":[], 
+                        "val_loss":[],
+                        "lr":[]}
+            if config.OPTIMIZER == 'adam':
+                optimizer = keras.optimizers.Adam(learning_rate=config_dict[f"{training.upper()}_LEARNING_RATE"])   
+            elif config.OPTIMIZER == 'sgd':
+                optimizer = keras.optimizers.SGD(learning_rate=config_dict[f"{training.upper()}_LEARNING_RATE"], momentum=config.MOMENTUM)
+            
+            model.compile(
+                optimizer=optimizer,
+                loss=loss_fn,
+                metrics=[]
+            )
+        else:
+            model = model_prev
         model.summary()
-        history = model.fit(train.repeat(), epochs=400, verbose=1,
+        epochs = config_dict[f"{training.upper()}_EPOCHS"] - prev_epochs
+        history = model.fit(train.repeat(), epochs=epochs, verbose=1,
                                 validation_data=val.repeat(),
                                 validation_steps=val.cardinality().numpy(),
                                 steps_per_epoch=train.cardinality().numpy(),
-                                    callbacks=create_callbacks(model_name, model_dir, backbone=False))
-        history_head["loss"].extend(history.history["loss"])
-        history_head["val_loss"].extend(history.history["val_loss"])
+                                    callbacks=create_callbacks(model_name, model_dir, backbone=False, freq_save=50*train.cardinality().numpy(),
+                                                                checkpoint_suffix=training))
+        final_model_path = os.path.join(model_dir, "models", f"{model_name}_{training}_final.keras")
+        model.save(final_model_path)
+        history_dict["loss"].extend(history.history["loss"])
+        history_dict["val_loss"].extend(history.history["val_loss"])
+        plot_path = os.path.join(os.path.join(model_dir, "logs"), f"{model_name}_{training}_loss.png")
+        plot_training_history(history_dict, save_path=plot_path)
+        history_dict["lr"].extend([config.HEAD_LEARNING_RATE] * len(history.history["loss"]))
+        histories.append(history_dict)
+    return histories[0], histories[1]
 
-        history_head["lr"].extend([learning_rate]* len(history.history["loss"]))
-
-
-    
-    # history_head = model.fit(train, steps_per_epoch=1, epochs=100, verbose=1)
-    history = history_head
-    # Evaluate the model on the validation set
-    # create new model with trained data
-    # print("Head layers trained. Now fine tuning the backbone...")
-    # # fine tune backbone
-    model.get_layer('MobileNetV3Small').trainable = True
-    if config.OPTIMIZER == 'adam':
-        optimizer = keras.optimizers.Adam(learning_rate=config.BACKBONE_LEARNING_RATE)   
-    elif config.OPTIMIZER == 'sgd':
-        optimizer = keras.optimizers.SGD(learning_rate=config.BACKBONE_LEARNING_RATE, momentum=config.MOMENTUM)
-    model.compile(
-        optimizer=optimizer,
-        loss=loss_fn,
-        metrics=["mae"]
-    )
-    model.summary()
-    history_back = {"loss":[], 
-                    "val_loss":[],
-                    "lr":[]}
-    history = model.fit(train.repeat(), epochs=1000, verbose=1,
-                                validation_data=val.repeat(),
-                                validation_steps=val.cardinality().numpy(),
-                                steps_per_epoch=train.cardinality().numpy(),
-                         callbacks=create_callbacks(model_name, model_dir, backbone=True))
-    history_back["loss"].extend(history.history["loss"])
-    history_back["val_loss"].extend(history.history["val_loss"])
-
-    history_back["lr"].extend([learning_rate]* len(history.history["loss"]))
-    # history_head = model.fit(train, steps_per_epoch=1, epochs=100, verbose=1)
-    # print(history.history)
-    return history_back, history_head
-
-
-def save_final_model(model, model_name="pose_model", model_dir=None):
-    """
-    Sauvegarde le modèle final
-    
-    Args:
-        model: Modèle Keras entraîné
-        model_name: Nom du modèle
-        model_dir: Dossier racine du modèle
-    
-    Returns:
-        tuple: (final_model_path, saved_model_dir)
-    """
-    models_dir = config.MODELS_DIR if model_dir is None else os.path.join(model_dir, "models")
-    
-    final_model_path = os.path.join(models_dir, f"{model_name}_final.keras")
-    model.save(final_model_path)
-    print(f"\nModel save in keras format: {final_model_path}")
-    
-    saved_model_dir = os.path.join(models_dir, f"{model_name}_saved_model")
-    tf.saved_model.save(model, saved_model_dir)
-    print(f"Model save in SavedModel format: {saved_model_dir}")
-    
-    return final_model_path, saved_model_dir
 
 def plot_training_history(history, save_path=None):
     """

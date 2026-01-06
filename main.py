@@ -59,17 +59,7 @@ def main(args):
         print("Model created")
 
         model_name = "pose_model"  # Nom simplifié car le dossier contient déjà la date/backbone
-        history_back, history_head = train_model(model=model, tf_data_set=(train_ds, val_ds), model_name=model_name, model_dir=model_dir)
-        print("Model trained")
-
-        final_model_path, saved_model_dir = save_final_model(model, model_name, model_dir)
-        print("Model_saved")
-    
-    if args.plot_history:
-        name = ["backbone", "head"]
-        for h, hist in enumerate([ history_back, history_head]):
-            plot_path = os.path.join(logs_dir, f"{model_name}_{name[h]}_history.png")
-            plot_training_history(hist, save_path=plot_path)
+        train_model(model=model, tf_data_set=(train_ds, val_ds), model_name=model_name, model_dir=model_dir)
     
     if args.skip_training:
         model = tf.keras.models.load_model(model_path)
