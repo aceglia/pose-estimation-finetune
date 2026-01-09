@@ -7,6 +7,8 @@ import tensorflow as tf
 from tensorflow import keras
 from ai_edge_litert.interpreter import Interpreter
 import config
+from validation_utils import from_heatmaps_to_coords
+import time
 
 
 def extract_keypoints_from_heatmaps(heatmaps, frame_shape):
@@ -56,12 +58,12 @@ def convert_to_tflite(model, output_path, quantize=True, quantization_type='int8
                 
         elif quantization_type == 'float16':
             print("\nConfiguration de la quantization FLOAT16 (haute précision)...")
-            converter.optimizations = [tf.lite.Optimize.DEFAULT]
+            # converter.optimizations = [tf.lite.Optimize.DEFAULT]
             converter.target_spec.supported_types = [tf.float16]
             
         elif quantization_type == 'dynamic':
             print("\nConfiguration de la quantization dynamique (range-based)...")
-            converter.optimizations = [tf.lite.Optimize.DEFAULT]
+            # converter.optimizations = [tf.lite.Optimize.DEFAULT]
             if representative_dataset is not None:
                 converter.representative_dataset = representative_dataset
             # Les poids sont quantizés dynamiquement, entrées/sorties restent float32
@@ -81,11 +83,6 @@ def convert_to_tflite(model, output_path, quantize=True, quantization_type='int8
     
     # Afficher la taille
     tflite_model_size = len(tflite_model) / 1024  # en Ko
-    print(f"\n✅ Modèle TFLite sauvegardé: {output_path}")
-    print(f"📊 Taille du modèle: {tflite_model_size:.2f} Ko")
-    print(f"🎯 Type de quantization: {quantization_type.upper()}")
-    
-    print("=" * 60)
     
     return tflite_model_size
 
@@ -130,68 +127,87 @@ def test_tflite_model(tflite_path, val_ds,  num_samples=10):
     print("\n🧪 Test du modèle TFLite...")
     
     # Charger l'interpréteur TFLite
-    interpreter = Interpreter(model_path=tflite_path)
-    interpreter.allocate_tensors()
-    
-    # Obtenir les détails des entrées/sorties
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
-    
-    print(f"\n📊 Détails de l'interpréteur:")
-    print(f"   - Input shape: {input_details[0]['shape']}")
-    print(f"   - Input type: {input_details[0]['dtype']}")
-    print(f"   - Output shape: {output_details[0]['shape']}")
-    print(f"   - Output type: {output_details[0]['dtype']}")
-    
-    # Tester sur quelques échantillons
-    # get images and labels from test set
-    all_images = []
-    all_labels = []
-    for images, labels in val_ds.unbatch().take(num_samples):
-        # images = tf.cast(images, tf.uint8)
-        images = np.array(images)[None, ...]
-        labels = (np.array(labels) * 255).astype(np.uint8)[None, ...] 
-        # convert all colors of heatmaps to red
-        # labels = np.stack([labels, labels, labels], axis=-1)
-        all_images.append(images)
-        all_labels.append(labels)
-    
-    errors = []
-    for i in range(min(num_samples, len(all_images))):
-        # Préparer l'entrée
-        input_data = all_images[i].astype(np.float32)
-        input_data = tf.cast(input_data, tf.float32)
-        # normalize between -1 and 1
-        # input_data = (input_data / 127.5) - 1
-        
-        # Si le modèle attend des uint8, il faut quantizer l'entrée
-        if input_details[0]['dtype'] == np.uint8:
-            input_scale, input_zero_point = input_details[0]['quantization']
-            input_data = (input_data / input_scale + input_zero_point)
-            input_data = tf.cast(input_data, tf.uint8)
-        
-        # Inférence
-        interpreter.set_tensor(input_details[0]['index'], input_data)
-        interpreter.invoke()
-        
-        # Récupérer la sortie
-        output_data = interpreter.get_tensor(output_details[0]['index'])
-        
-        # Si la sortie est quantizée, il faut la déquantizer
-        if output_details[0]['dtype'] == np.uint8:
-            output_scale, output_zero_point = output_details[0]['quantization']
-            output_data = (output_data.astype(np.float32) - output_zero_point) * output_scale
+    tf_models = os.listdir(tflite_path)
+    tf_models = [os.path.join(tflite_path, model) for model in tf_models if model.endswith(".tflite")]
+    tf_models = [tf_models[1], tf_models[2], tf_models[0]]
+    for tf_model in tf_models:
+        try:
+            model_type = tf_model.split("_")[-1].removesuffix(".tflite")
+            interpreter = Interpreter(model_path=tf_model)
+            interpreter.allocate_tensors()
+            
+            # Obtenir les détails des entrées/sorties
+            input_details = interpreter.get_input_details()
+            output_details = interpreter.get_output_details()
+            
+            print(f"\n📊 Détails de l'interpréteur:")
+            print(f"   - Input shape: {input_details[0]['shape']}")
+            print(f"   - Input type: {input_details[0]['dtype']}")
+            print(f"   - Output shape: {output_details[0]['shape']}")
+            print(f"   - Output type: {output_details[0]['dtype']}")
+            
+            # Tester sur quelques échantillons
+            # get images and labels from test set
+            all_images = []
+            all_labels = []
+            for images, labels in val_ds.unbatch().take(num_samples):
+                # images = tf.cast(images, tf.uint8)
+                images = np.array(images)[None, ...]
+                labels = np.array(labels)
+                # convert all colors of heatmaps to red
+                # labels = np.stack([labels, labels, labels], axis=-1)
+                all_images.append(images)
+                all_labels.append(labels)
 
-        # Calculer l'erreur
-        # error = np.mean(np.abs(output_data - all_labels[i]))
-        # # error in pixel 
-        # all_labels_pixel = all_labels[i] * input_data.shape[1]
-        # output_data_pixel = output_data * input_data.shape[1]
-        # error_pixel = np.mean(np.abs(output_data_pixel - all_labels_pixel))
-        # errors.append(error * 100)
-    
-    
-    # return avg_error
+            tic = time.time()
+            errors = None
+            for i in range(min(num_samples, len(all_images))):
+                # Préparer l'entrée
+                input_data = all_images[i]
+                input_data = tf.cast(input_data, tf.float32)
+                
+                # Si le modèle attend des uint8, il faut quantizer l'entrée
+                if input_details[0]['dtype'] == np.uint8:
+                    input_scale, input_zero_point = input_details[0]['quantization']
+                    input_data = (input_data / input_scale + input_zero_point)
+                    input_data = tf.cast(input_data, tf.uint8)
+                
+                # Inférence
+                interpreter.set_tensor(input_details[0]['index'], input_data)
+                interpreter.invoke()
+                
+                # Récupérer la sortie
+                output_data = interpreter.get_tensor(output_details[0]['index'])
+                
+                # Si la sortie est quantizée, il faut la déquantizer
+                if output_details[0]['dtype'] == np.uint8:
+                    output_scale, output_zero_point = output_details[0]['quantization']
+                    output_data = (output_data.astype(np.float32) - output_zero_point) * output_scale
+
+                gt_coords, _ = from_heatmaps_to_coords(all_labels[i], from_prediction=False)
+                pr_coords, _ = from_heatmaps_to_coords(output_data, from_prediction=True)
+                rmse = np.sqrt(np.mean((gt_coords - pr_coords) ** 2, axis=1))[0]
+                errors = np.vstack([errors, rmse]) if errors is not None else rmse
+            print(" ----- Model: ", model_type)
+            print("computed in: ", time.time() - tic)
+            print("Error: ", np.mean(errors, axis=0), " pixel")
+                # images_paths = os.path.join(model_dir, "images")
+                # os.makedirs(os.path.join(model_dir, "images"), exist_ok=True)
+                # import matplotlib.pyplot as plt
+                # for i in range(len(gt_coords)):
+                #     gt_coords_tmp = gt_coords[i]
+                #     pr_coords_tmp = pr_coords[i]
+                #     img_tmp = input_data[i]
+                #     img_tmp = img_tmp.numpy().astype(np.uint8)
+                #     [plt.scatter(gt_coords_tmp[1, i], gt_coords_tmp[0, i], color="r") for i in range(gt_coords_tmp.shape[-1])]
+                #     [plt.scatter(pr_coords_tmp[1, i], pr_coords_tmp[0, i], color="b", s=10) for i in range(pr_coords_tmp.shape[-1])]
+                #     plt.imshow(img_tmp)
+                #     plt.show()
+                    # plt.savefig(os.path.join(images_paths, f"image_{i}.png"))
+                    # plt.close()    
+        # return avg_error
+        except:
+            pass
 
 
 def export_model(model, model_name="pose_model", model_dir=None, representative_ds=None):
@@ -303,81 +319,6 @@ def export_model(model, model_name="pose_model", model_dir=None, representative_
     print("=" * 60)
     
     return tflite_paths
-    
-    # Si un modèle Keras est fourni, le sauvegarder d'abord
-    if model is not None:
-        saved_model_dir = os.path.join(config.MODELS_DIR, f"{model_name}_for_export")
-        print(f"\n💾 Sauvegarde du modèle au format SavedModel...")
-        model.save(saved_model_dir, save_format='tf')
-        model_path = saved_model_dir
-    
-    if model_path is None:
-        raise ValueError("Vous devez fournir soit 'model' soit 'model_path'")
-    
-    # Chemin de sortie pour le .tflite
-    tflite_filename = f"{model_name}_{quantization_type}.tflite"
-    tflite_path = os.path.join(config.MODELS_DIR, tflite_filename)
-    
-    # Créer le dataset représentatif si nécessaire
-    representative_dataset = None
-    if quantization_type == 'int8' and X_val is not None:
-        num_calibration_samples = min(500, len(X_val))
-        print(f"\n📊 Création du dataset représentatif ({num_calibration_samples} échantillons)...")
-        representative_dataset = create_representative_dataset_generator(
-            X_val, 
-            num_samples=num_calibration_samples
-        )
-    
-    # Convertir en TFLite
-    quantize = quantization_type != 'none'
-    tflite_size = convert_to_tflite(
-        model_path=model_path,
-        output_path=tflite_path,
-        quantize=quantize,
-        quantization_type=quantization_type,
-        representative_dataset=representative_dataset
-    )
-    
-    print(f"\n✅ Export terminé!")
-    print(f"📱 Modèle prêt pour le déploiement mobile: {tflite_path}")
-    
-    # Comparaison des tailles et précisions
-    print("\n" + "=" * 60)
-    print("📊 COMPARAISON DES OPTIONS DE QUANTIZATION")
-    print("=" * 60)
-    print("🎯 Précision (décroissante) | Taille | Vitesse | Recommandation")
-    print("-" * 60)
-    print("❌ Aucune (float32)       | ~25MB  | Très lent | Développement seulement")
-    print("🟡 Float16                | ~12MB  | Moyen     | BON COMPROMIS ⭐")
-    print("🟠 Dynamic Range          | ~6MB   | Rapide    | Mobile standard")
-    print("🔴 INT8                   | ~6MB   | Très rapide | Production intensive")
-    print("=" * 60)
-    
-    # Instructions pour l'utilisation
-    print("\n📱 UTILISATION DU MODÈLE TFLITE")
-    print("=" * 60)
-    print(f"\n🔧 Type de quantization utilisé: {quantization_type.upper()}")
-    
-    if quantization_type == 'float16':
-        print("💡 RECOMMANDÉ pour votre cas - Précision proche du Keras avec bonne performance")
-    elif quantization_type == 'none':
-        print("⚠️  ATTENTION - Modèle très volumineux, utilisez seulement pour tests")
-    
-    print("\n🤖 Android (Java/Kotlin):")
-    print("   1. Ajoutez le .tflite dans assets/")
-    print("   2. Ajoutez la dépendance: implementation 'org.tensorflow:tensorflow-lite:2.x.x'")
-    print("   3. Chargez avec: Interpreter.create(...)")
-    print("   4. Utilisez GPU Delegate ou NNAPI pour accélérer")
-    
-    print("\n🍎 iOS (Swift/Objective-C):")
-    print("   1. Ajoutez le .tflite au projet Xcode")
-    print("   2. Ajoutez TensorFlowLiteSwift via CocoaPods/SPM")
-    print("   3. Chargez avec: Interpreter(modelPath: ...)")
-    print("   4. Utilisez Metal Delegate pour accélérer")
-    
-    print("=" * 60)
-    
-    return tflite_path
 
 
 if __name__ == "__main__":

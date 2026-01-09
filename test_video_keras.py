@@ -8,49 +8,23 @@ import argparse
 import os
 from pathlib import Path
 import config
+from preprocessing_utils import decode_and_resize
+from validation_utils import from_heatmaps_to_coords, project_keypoints
 
-
-def load_keras_model(model_path):
-    """Charge le modèle Keras"""
-    print(f"🔄 Chargement du modèle Keras...")
-    model = keras.models.load_model(model_path)
-    print("✅ Modèle chargé")
-    return model
-
-
-def preprocess_frame(frame, input_size=(192, 192)):
-    """Prétraite une frame pour le modèle"""
-    frame_resized = cv2.resize(frame, input_size)
-    frame_normalized = frame_resized.astype(np.float32) / 255.0
-    frame_batch = np.expand_dims(frame_normalized, axis=0)
-    return frame_batch
 
 
 def predict_frame(model, frame):
     """Fait une prédiction sur une frame"""
-    input_data = preprocess_frame(frame)
+    input_data, padding = decode_and_resize(frame)
     heatmaps = model.predict(input_data, verbose=0)[0]
-    return heatmaps
+    return heatmaps, padding
 
 
-def extract_keypoints_from_heatmaps(heatmaps, frame_shape):
-    """Extrait les coordonnées des keypoints depuis les heatmaps"""
-    h, w = frame_shape[:2]
-    keypoints = []
-
-    for i in range(heatmaps.shape[-1]):
-        heatmap = heatmaps[:, :, i]
-        max_pos = np.unravel_index(heatmap.argmax(), heatmap.shape)
-        y = int(max_pos[0] * h / heatmap.shape[0])
-        x = int(max_pos[1] * w / heatmap.shape[1])
-        confidence = heatmap[max_pos]
-        keypoints.append({'x': x, 'y': y, 'confidence': confidence})
-
-    return keypoints
-
-
-def draw_keypoints(frame, keypoints, labels=None):
+def draw_keypoints(frame, heatmap, labels=None, padding=(0, 0)):
     """Dessine les keypoints sur la frame"""
+    keypoints = from_heatmaps_to_coords(heatmap, from_prediction=True)
+    keypoints = project_keypoints(keypoints, frame.shape[:-1], )
+
     if labels is None:
         labels = config.BODYPARTS
 
@@ -86,11 +60,9 @@ def draw_keypoints(frame, keypoints, labels=None):
 
 def process_video(video_path, model_path, output_path=None):
     """Traite une vidéo complète"""
-    print(f"💡 Utilisation du modèle: {model_path}")
-    print(f"📹 Vidéo: {video_path}")
 
     # Charger le modèle
-    model = load_keras_model(model_path)
+    model = keras.models.load_model(model_path)
 
     # Ouvrir la vidéo
     cap = cv2.VideoCapture(video_path)
@@ -103,24 +75,10 @@ def process_video(video_path, model_path, output_path=None):
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    print(f"\n📊 Propriétés de la vidéo:")
-    print(f"   - Résolution: {width}x{height}")
-    print(f"   - FPS: {fps}")
-    print(f"   - Frames: {total_frames}")
-
-    # Préparer la sortie
-    if output_path is None:
-        video_name = Path(video_path).stem
-        output_path = f"output/{video_name}_keras_annotated.mp4"
-
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
-    print(f"\n💾 Sortie: {output_path}")
-
     frame_count = 0
-    print("\n🔄 Traitement des frames...")
 
     while cap.isOpened():
         ret, frame = cap.read()
@@ -128,14 +86,11 @@ def process_video(video_path, model_path, output_path=None):
             break
 
         # Prédiction
-        heatmaps = predict_frame(model, frame)
-
-        # Extraire keypoints
-        keypoints = extract_keypoints_from_heatmaps(heatmaps, (height, width))
+        heatmaps, padding = predict_frame(model, frame)
 
         # Dessiner keypoints
         annotated_frame = frame.copy()
-        draw_keypoints(annotated_frame, keypoints)
+        draw_keypoints(annotated_frame, heatmaps, None, padding)
 
         # Écrire la frame
         out.write(annotated_frame)
@@ -150,58 +105,30 @@ def process_video(video_path, model_path, output_path=None):
     cap.release()
     out.release()
 
-    print(f"\n✅ Traitement terminé: {frame_count} frames traitées")
-    print(f"🎉 Vidéo annotée sauvegardée: {output_path}")
+    print(f"\nTraitement terminé: {frame_count} frames traitées")
 
     return output_path
 
-
-def main():
+def parse_args(video_path=None, output=None, model=None):
     """Fonction principale"""
     parser = argparse.ArgumentParser(description="Test du modèle Keras sur une vidéo")
-    parser.add_argument('--video', required=True, help='Chemin vers la vidéo à analyser')
-    parser.add_argument('--model', default=None,
-                       help='Chemin vers le modèle Keras (.h5)')
-    parser.add_argument('--output', help='Chemin de sortie pour la vidéo annotée')
+    parser.add_argument('--video', default=video_path, help='Chemin vers la vidéo à analyser')
+    parser.add_argument('--model', default=model,
+                       help='Chemin vers le modèle Keras (.keras)')
+    parser.add_argument('--output', default=output, help='Chemin de sortie pour la vidéo annotée')
 
     args = parser.parse_args()
+    return args
 
+def main(args):
     # Vérifier que la vidéo existe
     if not os.path.exists(args.video):
-        print(f"❌ Vidéo non trouvée: {args.video}")
+        print(f"Vidéo non trouvée: {args.video}")
         return
-
-    # Trouver le modèle si non spécifié
-    if not args.model:
-        # Chercher dans tous les dossiers de modèles
-        output_dir = Path(config.OUTPUT_DIR)
-        keras_models = []
-        
-        # Parcourir tous les dossiers de modèles
-        for model_dir in output_dir.iterdir():
-            if model_dir.is_dir() and not model_dir.name.startswith('.'):
-                models_subdir = model_dir / "models"
-                if models_subdir.exists():
-                    keras_models.extend(list(models_subdir.glob("*.h5")))
-        
-        if keras_models:
-            # Prendre le plus récent
-            args.model = str(max(keras_models, key=os.path.getctime))
-            print(f"💡 Utilisation du modèle Keras le plus récent: {args.model}")
-        else:
-            print("❌ Aucun modèle Keras (.h5) trouvé!")
-            print("💡 Entraînez d'abord le modèle avec: python main.py")
-            return
-
-    # Vérifier que le modèle existe
-    if not os.path.exists(args.model):
-        print(f"❌ Modèle non trouvé: {args.model}")
-        return
-
+    
     # Output par défaut
     if not args.output:
         video_name = Path(args.video).stem
-        
         # Utiliser le dossier videos du modèle actuel
         model_path = Path(args.model)
         model_dir = model_path.parent.parent  # Remonter de models/ vers le dossier du modèle
@@ -212,13 +139,15 @@ def main():
 
     # Traiter la vidéo
     try:
-        output_path = process_video(args.video, args.model, args.output)
-        print("\n💡 Touches:")
-        print("   - 'q': Quitter")
-        print("   - 'espace': Pause/Resume")
+        process_video(args.video, args.model, args.output)
+
     except Exception as e:
-        print(f"❌ Erreur lors du traitement: {e}")
+        print(f"Erreur lors du traitement: {e}")
 
 
 if __name__ == "__main__":
-    main()
+    video_path = "/mnt/c/Users/Usager/Documents/Amedeo/PFE/PFE/VideoBrute/Video_Trie_Apres100/115G.mp4"
+    model = "/mnt/c/Users/Usager/Documents/Amedeo/pose-estimation-finetune/output/MNv3S_20260108_103408/models/pose_model_backbone_final.keras"
+    output = f"/mnt/c/Users/Usager/Documents/Amedeo/pose-estimation-finetune/output/MNv3S_20260108_103408/videos/115G_keras_annotated.mp4"
+    args = parse_args(video_path, output, model)
+    main(args)

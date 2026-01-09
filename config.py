@@ -3,11 +3,12 @@ Configuration pour le fine-tuning de pose estimation
 """
 import os
 from datetime import datetime
+import tensorflow as tf 
 
 # Chemins
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 prefix = "/mnt/c" if os.name == "posix" else "C:\\"
-LABELED_DATA_DIR = os.path.join(prefix, "Users", "neuromolity-lab", "Downloads", "PFE", "PFE", "JambeGaucheLabeled", "1-TouteLabeledGauche")
+LABELED_DATA_DIR = os.path.join(prefix, "Users", "Usager", "Documents", "Amedeo", "PFE", "PFE", "JambeGaucheLabeled", "1-TouteLabeledGauche")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 backbone_mapping = {
         "MobileNetV2": "MNv2",
@@ -41,12 +42,84 @@ def get_model_folder_name(backbone=None, timestamp=None):
 
     return f"{clean_backbone}_{timestamp}"
 
+class TrainingConfig:
+    def __init__(self, dict):
+        self._init_dict = dict
+        self.SCHEDULE_LR = None
+        self.LR = None
+
+        self._init_from_dict()
+
+    def _init_from_dict(self):
+        for key, items in self._init_dict.items():
+            if key == "SCHEDULE_LR" and items is not None:
+                name = items.pop("name")
+                self.SCHEDULE_LR = get_schedule(name, items)
+                continue
+            setattr(self, key, items)
+        if self.LR is not None and self.SCHEDULE_LR is not None:
+            print("Warning: learning rate and schedule learning rate were both asked: learning rate will be ignore.")
+        if self.SCHEDULE_LR is not None:
+            setattr(self, "LR", self.SCHEDULE_LR)
+
+
+def get_schedule(name, kwargs):
+    if name == "cosine_decay":
+        return tf.keras.optimizers.schedules.CosineDecay(**kwargs)
+    if name == "exponential_decay":
+        return tf.keras.optimizers.schedules.ExponentialDecay(**kwargs)
+    if name == "inverse_time_decay":
+        return tf.keras.optimizers.schedules.InverseTimeDecay(**kwargs)
+    if name == "piecewise_constant_decay":
+        return tf.keras.optimizers.schedules.PiecewiseConstantDecay(**kwargs)
+    if name == "polynomial_decay":
+        return tf.keras.optimizers.schedules.PolynomialDecay(**kwargs)
+
+
+BACKBONE_TRAINING_DICT = {
+    "PERFORM": True, 
+    # "LR": 1e-3,
+    "TRAINABLE_LAYERS" : 150,
+    "EPOCHS" : 1000,
+    "OPTIMIZER" : "adam",
+    "MOMENTUM" : 0.9, 
+    "SCHEDULE_LR": {
+        "name": "piecewise_constant_decay",
+        # "initial_learning_rate": 1e-3, 
+        # "decay_steps": 1000,
+        # "decay_rate":0.9, 
+        # "staircase":True, 
+        "boundaries": [1500, 10000, 20000], 
+        "values":[5e-3, 1e-3, 1e-4, 1e-5]
+    }
+}
+
+HEAD_TRAINING_DICT = {
+    "PERFORM": True,
+    # "LR": 1e-2,
+    "TRAINABLE_LAYERS" : -1,
+    "EPOCHS" : 500,
+    "OPTIMIZER" : "adam",
+    "MOMENTUM" : 0.9, 
+    "SCHEDULE_LR": {
+        "name": "piecewise_constant_decay",
+        # "initial_learning_rate": 1e-3, 
+        # "decay_steps": 1000,
+        # "decay_rate":0.9, 
+        # "staircase":True, 
+        "boundaries": [600, 4000, 9000], 
+        "values":[5e-2, 1e-2, 1e-3, 5e-4]
+    }
+}
+
+BACKBONE_TRAINING = TrainingConfig(BACKBONE_TRAINING_DICT)
+HEAD_TRAINING = TrainingConfig(HEAD_TRAINING_DICT)
+
 # Dossier modèle actuel (sera défini dynamiquement)
 MODEL_DIR = None
 MODELS_DIR = None
 LOGS_DIR = None
-VIDEOS_DIR = LABELED_DATA_DIR = os.path.join(prefix, "Users", "neuromolity-lab", "Downloads", "PFE", "PFE", "JambeGaucheLabeled", "1-TouteLabeledGauche")
-
+VIDEOS_DIR = LABELED_DATA_DIR
 def setup_model_directories(model_folder_name=None):
     """Configure les dossiers pour un modèle spécifique"""
     global MODEL_DIR, MODELS_DIR, LOGS_DIR, VIDEOS_DIR
@@ -83,69 +156,18 @@ KEYPOINT_INDICES = {
 IMAGE_SIZE = (224, 224)
 INPUT_SHAPE = (*IMAGE_SIZE, 3)
 HEATMAP_SIZE = (56, 56)
-HEATMAP_SIGMA = 3.0
-NORMALIZE = True
+HEATMAP_SIGMA = 2.0
 
 # Entraînement
 TRAIN_SPLIT = 0.9
 BATCH_SIZE = 32
-HEAD_EPOCHS = 50
-BACKBONE_EPOCHS = 100
-LEARNING_RATE = 1e-3
-BACKBONE_LEARNING_RATE = 1e-6
-BACKBONE_TRAINABLE_LAYERS = 20
-HEAD_LEARNING_RATE = 5e-4
-OPTIMIZER = "adam"
-EARLY_STOPPING_PATIENCE = 50
-REDUCE_LR_PATIENCE = 5
-REDUCE_LR_FACTOR = 0.5
 RANDOM_SEED = 42
-MOMENTUM = 0.9
+
 
 # Modèle
-BACKBONE = "MobileNetV2"  # Par défaut: MobileNetV2 (rapide, léger, performant)
+BACKBONE = "MobileNetV3Large"  # Par défaut: MobileNetV2 (rapide, léger, performant)
 PRETRAINED_WEIGHTS = "imagenet"
 ALPHA = 0.75
-
-# Tailles d'images recommandées par backbone (pour performances optimales)
-BACKBONE_INPUT_SIZES = {
-    "MobileNetV2": (192, 192),
-    "MobileNetV3Small": (224, 224),
-    "MobileNetV3Large": (224, 224),
-    "EfficientNetLite0": (224, 224),
-    "EfficientNetLite1": (240, 240),
-    "EfficientNetLite2": (260, 260),
-    "EfficientNetLite3": (280, 280),
-    "EfficientNetLite4": (300, 300),
-    "EfficientNetB0": (224, 224),
-    "EfficientNetB1": (240, 240),
-    "EfficientNetB2": (260, 260),
-    "EfficientNetB3": (300, 300),
-    "EfficientNetV2B0": (224, 224),
-    "EfficientNetV2B1": (240, 240),
-    "EfficientNetV2B2": (260, 260),
-    "EfficientNetV2B3": (300, 300),
-}
-
-# Ratios de réduction du backbone (pour adapter la tête de déconvolution)
-BACKBONE_REDUCTION_RATIOS = {
-    "MobileNetV2": 32,          # 192/32 = 6x6
-    "MobileNetV3Small": 32,
-    "MobileNetV3Large": 32,
-    "EfficientNetLite0": 32,    # 224/32 = 7x7
-    "EfficientNetLite1": 32,
-    "EfficientNetLite2": 32,
-    "EfficientNetLite3": 32,
-    "EfficientNetLite4": 32,
-    "EfficientNetB0": 32,
-    "EfficientNetB1": 32,
-    "EfficientNetB2": 32,
-    "EfficientNetB3": 32,
-    "EfficientNetV2B0": 32,
-    "EfficientNetV2B1": 32,
-    "EfficientNetV2B2": 32,
-    "EfficientNetV2B3": 32,
-}
 
 # Export TFLite
 TFLITE_QUANTIZATION = True

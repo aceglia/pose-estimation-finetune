@@ -67,6 +67,11 @@ def create_tf_dataset(annotations):
     """
     image_paths = np.array([annotation['image_path'] for annotation in annotations])
     landmarks = np.array([np.array(list(annotation['keypoints'].values())).reshape(-1, 6) for annotation in annotations])
+
+    idxs_to_exclude = [False if "115G" in path else True for i, path in enumerate(image_paths)]
+    image_paths = image_paths[idxs_to_exclude]
+    landmarks = landmarks[idxs_to_exclude]
+   
     data_set_size = len(image_paths)
     train_size = int(data_set_size * config.TRAIN_SPLIT)
     random_seed = config.RANDOM_SEED

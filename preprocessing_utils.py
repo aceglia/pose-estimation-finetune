@@ -131,49 +131,10 @@ def augment(image, landmarks, aug_prob=0.8):
     return image, tf.reshape(landmarks, [-1])
 
 
-# def augment(image, landmarks, aug_prob=0.6, heatmap=True):
-#     heatmaps = None
-#     w, h = tf.shape(image)[0], tf.shape(image)[1]
-#     if tf.random.uniform(()) < aug_prob:
-#         # if tf.random.uniform(()) < 0.6:
-#         #     landmarks = tf.reshape(landmarks, (-1, 2))
-#         #     w, h = tf.shape(image)[0], tf.shape(image)[1]
-#         #     landmarks *= [w, h]
-#         #     landmarks = tf.cast(landmarks, tf.float32)
-#         #     landmarks = tf.reshape(landmarks, (-1,))
-#         #     image, landmarks = resize_with_pad_and_landmarks(image, landmarks, target=image.shape[0], homogeneous_scale=2 )#tf.random.uniform([], 0.8, 1.2))
-        
-#         if tf.random.uniform(()) < 0.4:
-#             angle = tf.random.uniform([], -10, 10) * math.pi / 180.0
-#             image = rotate_image(image, angle)
-#             center = [w / 2, h / 2]
-#             landmarks = tf.reshape(landmarks, (-1, 2))
-#             landmarks *= [w, h]
-#             landmarks = tf.cast(landmarks, tf.float32)
-#             landmarks = tf.subtract(landmarks, center)
-#             rot = tf.stack([
-#                 [tf.cos(angle), -tf.sin(angle)],
-#                 [tf.sin(angle),  tf.cos(angle)]
-#             ])
-#             landmarks = tf.matmul(landmarks, rot)
-#             landmarks += center
-#             landmarks = landmarks / tf.cast(tf.shape(image)[0], tf.float32)
-
-#         if tf.random.uniform(()) < 0.4:
-#             image = tf.image.random_brightness(image, 0.3)
-
-#         if tf.random.uniform(()) < 0.4:
-#             image = tf.image.random_contrast(image, 0.3, 0.7)
-
-#     if heatmap:
-#         heatmaps = generate_heatmaps(landmarks, config.HEATMAP_SIZE, sigma=config.HEATMAP_SIGMA)
-#         return image, heatmaps
-#     return image, tf.reshape(landmarks, (-1,))
-
-
 def preprocess(image, landmarks):
     image = tf.keras.applications.mobilenet_v3.preprocess_input(image)
     return image, landmarks
+
 
 def resize_with_pad_and_landmarks(image, landmarks, target=224, homogeneous_scale=None, heatmap=True):
     h, w = tf.shape(image)[0], tf.shape(image)[1]
@@ -214,12 +175,30 @@ def decode_image(image_path, landmarks):
     image = tf.io.read_file(image_path)
     image = tf.image.decode_image(image, channels=3)
     image = tf.cast(image, tf.float32)
-    # B, G, R = tf.split(image, 3, axis=-1)
-    # image = tf.concat([R, G, B], axis=-1)
     return image, landmarks
+
 
 def preprocess_common(image, landmarks):
     return resize_with_pad_and_landmarks(image, landmarks, target=config.INPUT_SHAPE[0], heatmap=True)
+
+
+def decode_and_resize(image_path, target):
+    image, _ = decode_image(image_path, _)
+    h, w = tf.shape(image)[0], tf.shape(image)[1]
+    scale = tf.minimum(
+        target / tf.cast(w, tf.float32),
+        target / tf.cast(h, tf.float32)
+    )
+    image = tf.image.resize_with_pad(image, target, target)
+
+    new_w = tf.cast(tf.cast(w, tf.float32) * scale, tf.int32)
+    new_h = tf.cast(tf.cast(h, tf.float32) * scale, tf.int32)
+    # image = tf.image.resize(image, (new_w, new_h))
+    pad_x = (target - new_w) // 2
+    pad_y = (target - new_h) // 2
+    image = tf.expand_dims(image, 0)
+    return image, [pad_x, pad_y]
+
 
 def gaussian_heatmap(coords, size, sigma=2):
     """

@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import os
 
 
-def from_heatmaps_to_coords(heatmap, from_prediction=True):
+def from_heatmaps_to_coords(heatmap, from_prediction=True, input_scale=config.INPUT_SHAPE[0]):
     if not isinstance(heatmap, np.ndarray):
         heatmap = heatmap.numpy()
     if len(heatmap.shape) != 4:
@@ -14,15 +14,16 @@ def from_heatmaps_to_coords(heatmap, from_prediction=True):
     for h, heat in enumerate(heatmap):
         if from_prediction:
             heat = tf.sigmoid(heat).numpy()
-        scale = config.INPUT_SHAPE[0] // config.HEATMAP_SIZE[0]
+        scale = input_scale // config.HEATMAP_SIZE[0]
         confidence = [np.max(heat[:, :, i]).tolist() for i in range(heat.shape[-1])]
         coords = [np.array(np.where(heat[:, :, i] == confidence[i])).flatten() * scale for i in range(heat.shape[-1])]
         for a, ar in enumerate(coords):
             if len(ar) != 2:
-                coords[a] = np.mean(ar.reshape(2, -1), axis=0)
+                coords[a] = np.mean(ar.reshape(2, -1), axis=1).astype(np.uint8)
 
         coords_array[h, ...] = np.array(coords).T
     return coords_array, confidence
+
 
 def plot_validation_images(model, val_ds, model_dir=""):
     img, gt_heatmaps = next(iter(val_ds.take(1)))
@@ -41,3 +42,12 @@ def plot_validation_images(model, val_ds, model_dir=""):
         plt.imshow(img_tmp)
         plt.savefig(os.path.join(images_paths, f"image_{i}.png"))
         plt.close()
+
+def project_keypoints(keypoints, image_size, paddings, input_size = config.INPUT_SHAPE[0]):
+    """
+    Keypoints ar already projected to the input size, we need to project them on the original image with according padding.
+    """
+    image_size_square = max(image_size)
+    scale = image_size_square // config.INPUT_SHAPE[0]
+    
+

@@ -2,6 +2,7 @@
 Script d'entraînement du modèle de pose estimation
 """
 import os
+import json
 
 import tensorflow as tf
 from tensorflow import keras
@@ -73,8 +74,8 @@ def create_callbacks(model_name="pose_model", model_dir=None, backbone=True, fre
     # )
     # callbacks.append(tensorboard)
     checkpoint = tf.keras.callbacks.ModelCheckpoint(
-    os.path.join(model_dir, f"model_{checkpoint_suffix}" + "_checkpoint_{epoch:03d}.keras"),
-    save_freq=freq_save,
+    os.path.join(checkpoints_dir, f"model_{checkpoint_suffix}" + "_checkpoint_{epoch:03d}.keras"),
+    save_freq=int(freq_save),
     )
     callbacks.append(checkpoint)
 
@@ -109,6 +110,47 @@ def check_previous_checkpoints(model_dir, model_name):
     
     return model, check
     
+def from_heatmaps_to_coord(heatmaps):
+    pass
+
+# def loss_fn(y_true, y_pred):
+#     # y_pred = tf.sigmoid(y_pred)
+#     # coords_pred = from_heatmaps_to_coord(y_pred)
+#     # coords_true = from_heatmaps_to_coord(y_true)
+
+#     return (y_true, y_pred) 
+
+
+def return_model_backbone(model):
+    nb_layers = config.BACKBONE_TRAINING.TRAINABLE_LAYERS if config.BACKBONE_TRAINING.TRAINABLE_LAYERS else len(model.get_layer(config.BACKBONE).layers)
+    nb_layers = min(nb_layers, len(model.get_layer(config.BACKBONE).layers))
+    start_layer = len(model.get_layer(config.BACKBONE).layers) - nb_layers
+    for l, layer in enumerate(model.get_layer(config.BACKBONE).layers):
+        if l >= start_layer:
+            if not isinstance(layer, tf.keras.layers.BatchNormalization):
+                layer.trainable = True
+    return model
+
+def fit_model(model, train, val, epochs,model_name, model_dir, training):
+    history = model.fit(train.repeat(), epochs=epochs, verbose=1,
+                        validation_data=val.repeat(),
+                        validation_steps=val.cardinality().numpy(),
+                        steps_per_epoch=train.cardinality().numpy(),
+                            callbacks=create_callbacks(model_name, model_dir, backbone=False, freq_save=50*train.cardinality().numpy(),
+                                                        checkpoint_suffix=training))
+    final_model_path = os.path.join(model_dir, "models", f"{model_name}_{training}_final.keras")
+    model.save(final_model_path)
+
+    plot_path = os.path.join(os.path.join(model_dir, "logs"), f"{model_name}_{training}_loss.png")
+    if training == "head":
+        history.history["loss"] = history.history["loss"][5:]
+        history.history["val_loss"] = history.history["val_loss"][5:]
+    plot_training_history(history.history, save_path=plot_path)
+
+def save_config(model_dir):
+    dict_to_save = {key: items for key, items in config.__dict__.items() if isinstance(items, (str, dict, list, tuple, int, float)) and not key.startswith("_")}
+    with open(os.path.join(model_dir, "config.json"), "w") as f:
+        json.dump(dict_to_save, f, indent=4)
 
 def train_model(model, 
                 tf_data_set=None,
@@ -127,32 +169,22 @@ def train_model(model,
         
     """
     loss_fn = tf.keras.losses.BinaryFocalCrossentropy(
-        from_logits=True, 
-        gamma=2.0,
-        apply_class_balancing=True 
-    )    
+            from_logits=True, 
+            gamma=2.0,
+            apply_class_balancing=True 
+        )
+    
+    save_config(model_dir)
     train, val = tf_data_set
-    config_dict = config.__dict__
-    histories = []
     for training in ["head", "backbone"]:
+        config_tmp = getattr(config, training.upper() + "_TRAINING")
         model_prev, prev_epochs = check_previous_checkpoints(model_dir, model_name + f"_{training}")
         if model_prev is None:
-            if training == "backbone":
-                nb_layers = config.BACKBONE_TRAINABLE_LAYERS if config.BACKBONE_TRAINABLE_LAYERS else len(model.get_layer('MobileNetV3Small').layers)
-                start_layer = len(model.get_layer('MobileNetV3Small').layers) - nb_layers
-                for l, layer in enumerate(model.get_layer('MobileNetV3Small').layers):
-                    if l >= start_layer:
-                        if not isinstance(layer, tf.keras.layers.BatchNormalization):
-                            layer.trainable = True
-
-            history_dict = {"loss":[], 
-                        "val_loss":[],
-                        "lr":[]}
-            if config.OPTIMIZER == 'adam':
-                optimizer = keras.optimizers.Adam(learning_rate=config_dict[f"{training.upper()}_LEARNING_RATE"])   
-            elif config.OPTIMIZER == 'sgd':
-                optimizer = keras.optimizers.SGD(learning_rate=config_dict[f"{training.upper()}_LEARNING_RATE"], momentum=config.MOMENTUM)
-            
+            model = return_model_backbone(model) if training == "backbone" else model
+            if config_tmp.OPTIMIZER == 'adam':
+                optimizer = keras.optimizers.Adam(learning_rate=config_tmp.LR)   
+            elif config_tmp.OPTIMIZER == 'sgd':
+                optimizer = keras.optimizers.SGD(learning_rate=config_tmp.LR, momentum=config_tmp.MOMENTUM)
             model.compile(
                 optimizer=optimizer,
                 loss=loss_fn,
@@ -161,22 +193,8 @@ def train_model(model,
         else:
             model = model_prev
         model.summary()
-        epochs = config_dict[f"{training.upper()}_EPOCHS"] - prev_epochs
-        history = model.fit(train.repeat(), epochs=epochs, verbose=1,
-                                validation_data=val.repeat(),
-                                validation_steps=val.cardinality().numpy(),
-                                steps_per_epoch=train.cardinality().numpy(),
-                                    callbacks=create_callbacks(model_name, model_dir, backbone=False, freq_save=50*train.cardinality().numpy(),
-                                                                checkpoint_suffix=training))
-        final_model_path = os.path.join(model_dir, "models", f"{model_name}_{training}_final.keras")
-        model.save(final_model_path)
-        history_dict["loss"].extend(history.history["loss"])
-        history_dict["val_loss"].extend(history.history["val_loss"])
-        plot_path = os.path.join(os.path.join(model_dir, "logs"), f"{model_name}_{training}_loss.png")
-        plot_training_history(history_dict, save_path=plot_path)
-        history_dict["lr"].extend([config.HEAD_LEARNING_RATE] * len(history.history["loss"]))
-        histories.append(history_dict)
-    return histories[0], histories[1]
+        epochs = config_tmp.EPOCHS - prev_epochs
+        fit_model(model, train, val, epochs, model_name, model_dir, training)
 
 
 def plot_training_history(history, save_path=None):

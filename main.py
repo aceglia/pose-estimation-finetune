@@ -13,7 +13,7 @@ from datetime import datetime
 import config
 from data_preprocessing import prepare_data
 from model import create_model
-from train import train_model, save_final_model, plot_training_history
+from train import train_model
 from export_tflite import export_model, test_tflite_model
 from validation_utils import plot_validation_images
 import tensorflow as tf
@@ -25,11 +25,6 @@ def main(args):
     # Configurer le backbone si spécifié en argument
     if args.backbone:
         config.BACKBONE = args.backbone
-        # Adapter la taille d'image selon le backbone
-        if args.backbone in config.BACKBONE_INPUT_SIZES:
-            recommended_size = config.BACKBONE_INPUT_SIZES[args.backbone]
-            config.IMAGE_SIZE = recommended_size
-            config.INPUT_SHAPE = (*recommended_size, 3)
     print(f"\nConfiguration:")
     print(f"   - Backbone: {config.BACKBONE}")
     print(f"   - Input size: {config.INPUT_SHAPE[0]}x{config.INPUT_SHAPE[1]}")
@@ -44,8 +39,6 @@ def main(args):
             raise ValueError("Vous devez fournir --model_path si --skip_training est activé")
         models_dir = os.path.dirname(args.model_path)
         model_dir = os.path.dirname(models_dir)
-        logs_dir = os.path.join(model_dir, "logs")
-        videos_dir = os.path.join(model_dir, "videos")
         model_name = "pose_model"
         model_path = args.model_path
 
@@ -60,18 +53,20 @@ def main(args):
 
         model_name = "pose_model"  # Nom simplifié car le dossier contient déjà la date/backbone
         train_model(model=model, tf_data_set=(train_ds, val_ds), model_name=model_name, model_dir=model_dir)
+        plot_validation_images(model, val_ds, model_dir)
     
     if args.skip_training:
         model = tf.keras.models.load_model(model_path)
-    if args.skip_data_prep:
-        train_ds, val_ds = prepare_data()
-    plot_validation_images(model, val_ds, model_dir)
 
     if not args.skip_export:
+        if args.skip_data_prep:
+            train_ds, val_ds = prepare_data()
         tflite_paths = export_model(model = model, model_name=model_name, model_dir=model_dir, representative_ds=val_ds)
 
-    # if args.test_tflite:
-    #     test_tflite_model(model_path.replace("final.keras", "dynamic.tflite"), val_ds=val_ds, num_samples=10)
+    if args.test_tflite:
+        if args.skip_data_prep:
+            train_ds, val_ds = prepare_data()
+        test_tflite_model(models_dir, val_ds=val_ds, num_samples=20)
 
 def parse_arguments():
     """
@@ -155,6 +150,7 @@ if __name__ == "__main__":
     args = parse_arguments()
     # args.skip_training = True
     # # args.skip_export = True
+    # args.model_path = r"/mnt/c/Users/Usager/Documents/Amedeo/pose-estimation-finetune/output/MNv3S_20260108_103408/models/pose_model_backbone_final.keras"
     # args.model_path = r"/mnt/c/Users/neuromolity-lab/Documents/amedeo/pose-estimation-finetune/output/MNv3S_20260102_103228/models/pose_model_final.keras"
 
     # Lancer le pipeline
