@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import os
 
 
-def from_heatmaps_to_coords(heatmap, from_prediction=True, input_scale=config.INPUT_SHAPE[0]):
+def from_heatmaps_to_coords(heatmap, from_prediction=True, input_scale=config.INPUT_SHAPE):
     if not isinstance(heatmap, np.ndarray):
         heatmap = heatmap.numpy()
     if len(heatmap.shape) != 4:
@@ -14,7 +14,7 @@ def from_heatmaps_to_coords(heatmap, from_prediction=True, input_scale=config.IN
     for h, heat in enumerate(heatmap):
         if from_prediction:
             heat = tf.sigmoid(heat).numpy()
-        scale = input_scale // config.HEATMAP_SIZE[0]
+        scale = input_scale[0] // config.HEATMAP_SIZE[0]
         confidence = [np.max(heat[:, :, i]).tolist() for i in range(heat.shape[-1])]
         coords = [np.array(np.where(heat[:, :, i] == confidence[i])).flatten() * scale for i in range(heat.shape[-1])]
         for a, ar in enumerate(coords):
@@ -28,6 +28,8 @@ def from_heatmaps_to_coords(heatmap, from_prediction=True, input_scale=config.IN
 def plot_validation_images(model, val_ds, model_dir=""):
     img, gt_heatmaps = next(iter(val_ds.take(1)))
     y_pred = model.predict(img)
+    sig_pred = tf.sigmoid(y_pred)
+    max_sig = tf.maximum(sig_pred, sig_pred)
     gt_coords, _ = from_heatmaps_to_coords(gt_heatmaps, from_prediction=False)
     pr_coords, _ = from_heatmaps_to_coords(y_pred, from_prediction=True)
     images_paths = os.path.join(model_dir, "images")
@@ -43,11 +45,17 @@ def plot_validation_images(model, val_ds, model_dir=""):
         plt.savefig(os.path.join(images_paths, f"image_{i}.png"))
         plt.close()
 
-def project_keypoints(keypoints, image_size, paddings, input_size = config.INPUT_SHAPE[0]):
+def project_keypoints(keypoints, image_size, paddings, input_size = config.INPUT_SHAPE):
     """
     Keypoints ar already projected to the input size, we need to project them on the original image with according padding.
     """
     image_size_square = max(image_size)
-    scale = image_size_square // config.INPUT_SHAPE[0]
-    
+    input_size = input_size[0]
+    keypoints *= image_size_square // input_size 
+    keypoints[0, 1, :] -= np.array((paddings[0]) * (image_size_square // input_size))
+    keypoints[0, 0, :] -= np.array((paddings[1]) * (image_size_square // input_size))
+    return keypoints
 
+
+def evaluate_model(model, val_ds, model_dir):
+    plot_validation_images(model, val_ds, model_dir)

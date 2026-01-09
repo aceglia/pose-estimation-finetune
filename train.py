@@ -152,6 +152,33 @@ def save_config(model_dir):
     with open(os.path.join(model_dir, "config.json"), "w") as f:
         json.dump(dict_to_save, f, indent=4)
 
+
+def from_heatmaps_to_coords(heatmap, from_prediction=True, input_scale=config.INPUT_SHAPE):
+    if not isinstance(heatmap, np.ndarray):
+        heatmap = heatmap.numpy()
+    if len(heatmap.shape) != 4:
+        heatmap = heatmap[None, :, :, :]
+    coords_array = np.zeros((heatmap.shape[0], 2, heatmap.shape[-1]))
+    for h, heat in enumerate(heatmap):
+        if from_prediction:
+            heat = tf.sigmoid(heat).numpy()
+        scale = input_scale[0] // config.HEATMAP_SIZE[0]
+        confidence = [np.max(heat[:, :, i]).tolist() for i in range(heat.shape[-1])]
+        coords = [np.array(np.where(heat[:, :, i] == confidence[i])).flatten() * scale for i in range(heat.shape[-1])]
+        for a, ar in enumerate(coords):
+            if len(ar) != 2:
+                coords[a] = np.mean(ar.reshape(2, -1), axis=1).astype(np.uint8)
+
+        coords_array[h, ...] = np.array(coords).T
+    return coords_array, confidence
+
+# @tf.keras.saving.register_keras_serializable()
+def custom_loss(y_true, y_pred):
+    sig_pred = tf.sigmoid(y_pred)
+
+
+
+
 def train_model(model, 
                 tf_data_set=None,
                 model_name="pose_model",
@@ -171,7 +198,8 @@ def train_model(model,
     loss_fn = tf.keras.losses.BinaryFocalCrossentropy(
             from_logits=True, 
             gamma=2.0,
-            apply_class_balancing=True 
+            alpha=0.6,
+            apply_class_balancing=False 
         )
     
     save_config(model_dir)

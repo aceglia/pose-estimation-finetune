@@ -13,18 +13,19 @@ from validation_utils import from_heatmaps_to_coords, project_keypoints
 
 
 
-def predict_frame(model, frame):
+def predict_frame(model, frame, input_size):
     """Fait une prédiction sur une frame"""
-    input_data, padding = decode_and_resize(frame)
+    input_data, padding = decode_and_resize(frame, input_size[0])
     heatmaps = model.predict(input_data, verbose=0)[0]
-    return heatmaps, padding
+    return heatmaps, padding, input_data
 
 
-def draw_keypoints(frame, heatmap, labels=None, padding=(0, 0)):
+def draw_keypoints(frame, heatmap, labels=None, padding=(0, 0), input_size=config.INPUT_SHAPE[0]):
     """Dessine les keypoints sur la frame"""
-    keypoints = from_heatmaps_to_coords(heatmap, from_prediction=True)
-    keypoints = project_keypoints(keypoints, frame.shape[:-1], )
+    keypoints, confidence = from_heatmaps_to_coords(heatmap, from_prediction=True, input_scale=input_size)
 
+    # keypoints = project_keypoints(keypoints, frame.shape[:-1], padding, input_size=input_size)[0].astype(int)
+    keypoints = keypoints[0].astype(int)
     if labels is None:
         labels = config.BODYPARTS
 
@@ -33,27 +34,29 @@ def draw_keypoints(frame, heatmap, labels=None, padding=(0, 0)):
         (0, 255, 0),    # Genoux - Vert
         (0, 0, 255)     # Cheville - Bleu
     ]
+    # for i in range(len(keypoints)):
+        # coords_tmp = keypoints[i]
+    [cv2.circle(frame, (keypoints[1, i], keypoints[0, i]), 4, colors[i], -1) for i in range(keypoints.shape[-1])]
+    # [plt.scatter(keypoints[1, i], keypoints[0, i], color="r") for i in range(keypoints.shape[-1])]
+    # for i, kp in enumerate(keypoints):
+    #     color = colors[i % len(colors)]
+    #     # Dessiner le point
+    #     cv2.circle(frame, (kp[0], kp[1]), 8, color, -1)
+    #     cv2.circle(frame, (kp[0], kp[1]), 10, (255, 255, 255), 2)
 
-    for i, kp in enumerate(keypoints):
-        color = colors[i % len(colors)]
+    #     # Ajouter le label et la confiance
+    #     label = f"{labels[i]}: {confidence[i]:.2f}"
+    #     cv2.putText(frame, label, (kp[0] + 15, kp[1] - 10),
+    #                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-        # Dessiner le point
-        cv2.circle(frame, (kp['x'], kp['y']), 8, color, -1)
-        cv2.circle(frame, (kp['x'], kp['y']), 10, (255, 255, 255), 2)
-
-        # Ajouter le label et la confiance
-        label = f"{labels[i]}: {kp['confidence']:.2f}"
-        cv2.putText(frame, label, (kp['x'] + 15, kp['y'] - 10),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-
-    # Dessiner les connexions (squelette)
-    if len(keypoints) >= 3:
-        # Hanche -> Genoux
-        cv2.line(frame, (keypoints[0]['x'], keypoints[0]['y']), 
-                (keypoints[1]['x'], keypoints[1]['y']), (255, 255, 0), 2)
-        # Genoux -> Cheville
-        cv2.line(frame, (keypoints[1]['x'], keypoints[1]['y']), 
-                (keypoints[2]['x'], keypoints[2]['y']), (255, 255, 0), 2)
+    # # Dessiner les connexions (squelette)
+    # if len(keypoints) >= 3:
+    #     # Hanche -> Genoux
+    #     cv2.line(frame, (keypoints[0][0], keypoints[0][1]), 
+    #             (keypoints[1][0], keypoints[1][1]), (255, 255, 0), 2)
+    #     # Genoux -> Cheville
+    #     cv2.line(frame, (keypoints[1][0], keypoints[1][1]), 
+    #             (keypoints[2][0], keypoints[2][1]), (255, 255, 0), 2)
 
     return frame
 
@@ -63,7 +66,7 @@ def process_video(video_path, model_path, output_path=None):
 
     # Charger le modèle
     model = keras.models.load_model(model_path)
-
+    input_size = model.input_shape[1:-1]
     # Ouvrir la vidéo
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -76,7 +79,9 @@ def process_video(video_path, model_path, output_path=None):
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+    # out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+    out = cv2.VideoWriter(output_path, fourcc, fps, input_size)
+
 
     frame_count = 0
 
@@ -84,14 +89,16 @@ def process_video(video_path, model_path, output_path=None):
         ret, frame = cap.read()
         if not ret:
             break
+        
+        frame_to_process = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         # Prédiction
-        heatmaps, padding = predict_frame(model, frame)
-
+        heatmaps, padding, input_frame = predict_frame(model, frame_to_process, input_size)
+        annotated_frame = input_frame[0].numpy().astype(np.uint8)
+        annotated_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR)
         # Dessiner keypoints
-        annotated_frame = frame.copy()
-        draw_keypoints(annotated_frame, heatmaps, None, padding)
-
+        # annotated_frame = frame.copy()
+        draw_keypoints(annotated_frame, heatmaps, None, padding, input_size)
         # Écrire la frame
         out.write(annotated_frame)
 
@@ -147,7 +154,7 @@ def main(args):
 
 if __name__ == "__main__":
     video_path = "/mnt/c/Users/Usager/Documents/Amedeo/PFE/PFE/VideoBrute/Video_Trie_Apres100/115G.mp4"
-    model = "/mnt/c/Users/Usager/Documents/Amedeo/pose-estimation-finetune/output/MNv3S_20260108_103408/models/pose_model_backbone_final.keras"
-    output = f"/mnt/c/Users/Usager/Documents/Amedeo/pose-estimation-finetune/output/MNv3S_20260108_103408/videos/115G_keras_annotated.mp4"
+    model = "/mnt/c/Users/Usager/Documents/Amedeo/pose-estimation-finetune/output/MNv3S_20260109_091957/models/pose_model_backbone_final.keras"
+    output = f"/mnt/c/Users/Usager/Documents/Amedeo/pose-estimation-finetune/output/MNv3S_20260109_091957/videos/115G_keras_annotated.mp4"
     args = parse_args(video_path, output, model)
     main(args)

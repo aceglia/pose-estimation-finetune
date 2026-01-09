@@ -15,7 +15,7 @@ from data_preprocessing import prepare_data
 from model import create_model
 from train import train_model
 from export_tflite import export_model, test_tflite_model
-from validation_utils import plot_validation_images
+from validation_utils import plot_validation_images, evaluate_model
 import tensorflow as tf
 
 
@@ -53,10 +53,10 @@ def main(args):
 
         model_name = "pose_model"  # Nom simplifié car le dossier contient déjà la date/backbone
         train_model(model=model, tf_data_set=(train_ds, val_ds), model_name=model_name, model_dir=model_dir)
-        plot_validation_images(model, val_ds, model_dir)
     
     if args.skip_training:
         model = tf.keras.models.load_model(model_path)
+        evaluate_model(model, val_ds, model_dir)
 
     if not args.skip_export:
         if args.skip_data_prep:
@@ -148,9 +148,9 @@ if __name__ == "__main__":
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
     # Parser les arguments
     args = parse_arguments()
-    # args.skip_training = True
-    # # args.skip_export = True
-    # args.model_path = r"/mnt/c/Users/Usager/Documents/Amedeo/pose-estimation-finetune/output/MNv3S_20260108_103408/models/pose_model_backbone_final.keras"
+    args.skip_training = True
+    args.skip_export = True
+    args.model_path = r"/mnt/c/Users/Usager/Documents/Amedeo/pose-estimation-finetune/output/MNv3S_20260109_091957/models/pose_model_backbone_final.keras"
     # args.model_path = r"/mnt/c/Users/neuromolity-lab/Documents/amedeo/pose-estimation-finetune/output/MNv3S_20260102_103228/models/pose_model_final.keras"
 
     # Lancer le pipeline

@@ -182,8 +182,10 @@ def preprocess_common(image, landmarks):
     return resize_with_pad_and_landmarks(image, landmarks, target=config.INPUT_SHAPE[0], heatmap=True)
 
 
-def decode_and_resize(image_path, target):
-    image, _ = decode_image(image_path, _)
+def decode_and_resize(image, target):
+    if isinstance(image, str):
+        image, _ = decode_image(image, None)
+    image = tf.cast(image, tf.float32)
     h, w = tf.shape(image)[0], tf.shape(image)[1]
     scale = tf.minimum(
         target / tf.cast(w, tf.float32),

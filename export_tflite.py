@@ -206,8 +206,8 @@ def test_tflite_model(tflite_path, val_ds,  num_samples=10):
                     # plt.savefig(os.path.join(images_paths, f"image_{i}.png"))
                     # plt.close()    
         # return avg_error
-        except:
-            pass
+        except Exception as e:
+            print(f"Error occured while testing tflite model {model_type}: {e}")
 
 
 def export_model(model, model_name="pose_model", model_dir=None, representative_ds=None):
