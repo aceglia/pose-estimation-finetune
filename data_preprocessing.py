@@ -78,7 +78,9 @@ def create_tf_dataset(annotations):
     all_idxs = np.random.RandomState(random_seed).permutation(data_set_size)
     random_train_idx = all_idxs[:train_size]
     random_val_idx = np.random.RandomState(random_seed).permutation(data_set_size)[train_size:]
-
+    random_train_idx = random_train_idx[0:1]
+    random_val_idx = random_val_idx[0:1]
+    
     train_img_paths = tf.constant(image_paths[random_train_idx])
     train_landmarks = tf.constant(landmarks[random_train_idx])
 

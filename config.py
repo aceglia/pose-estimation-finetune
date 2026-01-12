@@ -78,9 +78,9 @@ def get_schedule(name, kwargs):
 
 BACKBONE_TRAINING_DICT = {
     "PERFORM": True, 
-    # "LR": 1e-3,
-    "TRAINABLE_LAYERS" : 150,
-    "EPOCHS" : 1000,
+    "LR": 1e-3,
+    "TRAINABLE_LAYERS" : 50,
+    "EPOCHS" : 500,
     "OPTIMIZER" : "adam",
     "MOMENTUM" : 0.9, 
     "SCHEDULE_LR": {
@@ -95,21 +95,21 @@ BACKBONE_TRAINING_DICT = {
 }
 
 HEAD_TRAINING_DICT = {
-    "PERFORM": True,
-    # "LR": 1e-2,
+    "PERFORM": False,
+    "LR": 1e-3,
     "TRAINABLE_LAYERS" : -1,
-    "EPOCHS" : 500,
+    "EPOCHS" : 50,
     "OPTIMIZER" : "adam",
     "MOMENTUM" : 0.9, 
-    "SCHEDULE_LR": {
-        "name": "piecewise_constant_decay",
-        # "initial_learning_rate": 1e-3, 
-        # "decay_steps": 1000,
-        # "decay_rate":0.9, 
-        # "staircase":True, 
-        "boundaries": [600, 4000, 9000], 
-        "values":[5e-2, 1e-2, 1e-3, 5e-4]
-    }
+    # "SCHEDULE_LR": {
+    #     "name": "piecewise_constant_decay",
+    #     # "initial_learning_rate": 1e-3, 
+    #     # "decay_steps": 1000,
+    #     # "decay_rate":0.9, 
+    #     # "staircase":True, 
+    #     "boundaries": [600, 4000, 9000], 
+    #     "values":[1e-3, 1e-2, 1e-3, 5e-4]
+    # }
 }
 
 BACKBONE_TRAINING = TrainingConfig(BACKBONE_TRAINING_DICT)
@@ -160,7 +160,7 @@ HEATMAP_SIGMA = 2.0
 
 # Entraînement
 TRAIN_SPLIT = 0.9
-BATCH_SIZE = 32
+BATCH_SIZE = 1 #32
 RANDOM_SEED = 42
 
 

@@ -8,6 +8,7 @@ import tensorflow as tf
 from tensorflow import keras
 import config
 import numpy as np
+from train_utils import LandmarkHuberLoss, HeatmapToCoordinates
 
 
 def create_callbacks(model_name="pose_model", model_dir=None, backbone=True, freq_save=1, checkpoint_suffix=""):
@@ -110,16 +111,6 @@ def check_previous_checkpoints(model_dir, model_name):
     
     return model, check
     
-def from_heatmaps_to_coord(heatmaps):
-    pass
-
-# def loss_fn(y_true, y_pred):
-#     # y_pred = tf.sigmoid(y_pred)
-#     # coords_pred = from_heatmaps_to_coord(y_pred)
-#     # coords_true = from_heatmaps_to_coord(y_true)
-
-#     return (y_true, y_pred) 
-
 
 def return_model_backbone(model):
     nb_layers = config.BACKBONE_TRAINING.TRAINABLE_LAYERS if config.BACKBONE_TRAINING.TRAINABLE_LAYERS else len(model.get_layer(config.BACKBONE).layers)
@@ -131,21 +122,33 @@ def return_model_backbone(model):
                 layer.trainable = True
     return model
 
+
+def save_final_model(model, model_path):
+    heatmaps_output = model.output
+    coords_output = HeatmapToCoordinates(config.HEATMAP_SIZE[0], config.INPUT_SHAPE[0], name="coords")(heatmaps_output)
+    inference_model = tf.keras.Model(inputs=model.input, outputs=coords_output)
+    inference_model.save(model_path.replace("_backbone", ""))
+    return inference_model
+
 def fit_model(model, train, val, epochs,model_name, model_dir, training):
     history = model.fit(train.repeat(), epochs=epochs, verbose=1,
-                        validation_data=val.repeat(),
-                        validation_steps=val.cardinality().numpy(),
+                        # validation_data=val.repeat(),
+                        # validation_steps=val.cardinality().numpy(),
                         steps_per_epoch=train.cardinality().numpy(),
-                            callbacks=create_callbacks(model_name, model_dir, backbone=False, freq_save=50*train.cardinality().numpy(),
+                            callbacks=create_callbacks(model_name, model_dir, backbone=False, freq_save=150*train.cardinality().numpy(),
                                                         checkpoint_suffix=training))
     final_model_path = os.path.join(model_dir, "models", f"{model_name}_{training}_final.keras")
     model.save(final_model_path)
+    if training == "backbone":
+        model = save_final_model(model, final_model_path)
 
     plot_path = os.path.join(os.path.join(model_dir, "logs"), f"{model_name}_{training}_loss.png")
     if training == "head":
         history.history["loss"] = history.history["loss"][5:]
-        history.history["val_loss"] = history.history["val_loss"][5:]
+        history.history["val_loss"] = [0] * 100 #history.history["val_loss"][5:]
+    history.history["val_loss"] = [0] * 100 
     plot_training_history(history.history, save_path=plot_path)
+    return model
 
 def save_config(model_dir):
     dict_to_save = {key: items for key, items in config.__dict__.items() if isinstance(items, (str, dict, list, tuple, int, float)) and not key.startswith("_")}
@@ -172,12 +175,6 @@ def from_heatmaps_to_coords(heatmap, from_prediction=True, input_scale=config.IN
         coords_array[h, ...] = np.array(coords).T
     return coords_array, confidence
 
-# @tf.keras.saving.register_keras_serializable()
-def custom_loss(y_true, y_pred):
-    sig_pred = tf.sigmoid(y_pred)
-
-
-
 
 def train_model(model, 
                 tf_data_set=None,
@@ -201,11 +198,16 @@ def train_model(model,
             alpha=0.6,
             apply_class_balancing=False 
         )
+
     
     save_config(model_dir)
     train, val = tf_data_set
     for training in ["head", "backbone"]:
         config_tmp = getattr(config, training.upper() + "_TRAINING")
+        with_coords = True if training == "backbone" else False
+        loss_fn = LandmarkHuberLoss(heatmap_size=config.HEATMAP_SIZE[0], input_size=config.INPUT_SHAPE[0], delta=1.0, with_coords=with_coords)
+        if not config_tmp.PERFORM:
+            continue
         model_prev, prev_epochs = check_previous_checkpoints(model_dir, model_name + f"_{training}")
         if model_prev is None:
             model = return_model_backbone(model) if training == "backbone" else model
@@ -222,7 +224,8 @@ def train_model(model,
             model = model_prev
         model.summary()
         epochs = config_tmp.EPOCHS - prev_epochs
-        fit_model(model, train, val, epochs, model_name, model_dir, training)
+        model = fit_model(model, train, val, epochs, model_name, model_dir, training)
+    return model
 
 
 def plot_training_history(history, save_path=None):

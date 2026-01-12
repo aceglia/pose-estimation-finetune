@@ -9,7 +9,7 @@ from ai_edge_litert.interpreter import Interpreter
 import config
 from validation_utils import from_heatmaps_to_coords
 import time
-
+from train_utils import HeatmapToCoordinates
 
 def extract_keypoints_from_heatmaps(heatmaps, frame_shape):
     """Extrait les coordonnées des keypoints depuis les heatmaps"""
@@ -48,10 +48,10 @@ def convert_to_tflite(model, output_path, quantize=True, quantization_type='int8
             print("\nConfiguration de la quantization INT8 optimisée...")
             converter.optimizations = [tf.lite.Optimize.DEFAULT]
             converter.inference_input_type = tf.uint8
-            converter.inference_output_type = tf.uint8
+            converter.inference_output_type = tf.float32
             converter.target_spec.supported_ops = [
                 tf.lite.OpsSet.TFLITE_BUILTINS_INT8,
-                tf.lite.OpsSet.TFLITE_BUILTINS,
+                # tf.lite.OpsSet.TFLITE_BUILTINS,
             ]
             if representative_dataset is not None:
                 converter.representative_dataset = representative_dataset
