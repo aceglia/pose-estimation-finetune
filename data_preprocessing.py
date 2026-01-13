@@ -97,7 +97,7 @@ def create_tf_dataset(annotations):
     train_dataset = (
         train_ds
         .map(decode_image, num_parallel_calls=tf.data.AUTOTUNE)
-        .map(augment, num_parallel_calls=tf.data.AUTOTUNE)
+        # .map(augment, num_parallel_calls=tf.data.AUTOTUNE)
         .map(preprocess_common, num_parallel_calls=tf.data.AUTOTUNE)
         .batch(config.BATCH_SIZE, drop_remainder=True)
         # .prefetch(tf.data.AUTOTUNE)

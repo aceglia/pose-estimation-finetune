@@ -175,10 +175,10 @@ def get_head(num_keypoints=3, backbone_output=None, heatmaps=True, heatmap_size=
         return outputs
 
     # for f in [256, 128, 64]:
-    for f in [256, 256, 256]:
-        x = layers.Conv2DTranspose(f, 4, strides=2, padding="same")(x)
-        x = layers.BatchNormalization()(x)
-        x = layers.ReLU()(x)
+    for f in [256]:
+        x = layers.Conv2DTranspose(f, 3, strides=2, padding="same")(x)
+        # x = layers.BatchNormalization()(x)
+        # x = layers.ReLU()(x)
 
     heatmaps = layers.Conv2D(
         num_keypoints,
@@ -229,11 +229,21 @@ def build_pose_model(num_keypoints=3, backbone_name="MobileNetV2", input_shape=(
     
     backbone.trainable = False
 
-    x = backbone(inputs)
+    x = backbone.get_layer("activation_11").output
+    x = layers.Conv2DTranspose(256, 4, strides=2, padding="same")(x)
+    x = layers.Conv2DTranspose(256, 4, strides=2, padding="same")(x)
+    heatmaps = layers.Conv2D(
+        num_keypoints,
+        1,
+        padding="same",
+        name="heatmap_output"
+    )(x)
 
-    outputs = get_head(num_keypoints, x, heatmaps=True, heatmap_size=config.HEATMAP_SIZE)
+    # x = layers.Conv2D(576, kernel_size=3, padding='same', dilation_rate=2, activation='relu')(x)
 
-    model = Model(inputs=inputs, outputs=outputs, name=f'pose_estimation_{backbone_name}')
+    # outputs = get_head(num_keypoints, x, heatmaps=True, heatmap_size=config.HEATMAP_SIZE)
+
+    model = Model(inputs=backbone.inputs, outputs=heatmaps, name=f'pose_estimation_{backbone_name}')
     
     return model
 

@@ -79,26 +79,26 @@ def get_schedule(name, kwargs):
 BACKBONE_TRAINING_DICT = {
     "PERFORM": True, 
     "LR": 1e-3,
-    "TRAINABLE_LAYERS" : 50,
-    "EPOCHS" : 500,
+    "TRAINABLE_LAYERS" : None,
+    "EPOCHS" : 300,
     "OPTIMIZER" : "adam",
     "MOMENTUM" : 0.9, 
-    "SCHEDULE_LR": {
-        "name": "piecewise_constant_decay",
-        # "initial_learning_rate": 1e-3, 
-        # "decay_steps": 1000,
-        # "decay_rate":0.9, 
-        # "staircase":True, 
-        "boundaries": [1500, 10000, 20000], 
-        "values":[5e-3, 1e-3, 1e-4, 1e-5]
-    }
+    # "SCHEDULE_LR": {
+    #     "name": "piecewise_constant_decay",
+    #     # "initial_learning_rate": 1e-3, 
+    #     # "decay_steps": 1000,
+    #     # "decay_rate":0.9, 
+    #     # "staircase":True, 
+    #     "boundaries": [1500, 10000, 20000], 
+    #     "values":[5e-3, 1e-3, 1e-4, 1e-5]
+    # }
 }
 
 HEAD_TRAINING_DICT = {
     "PERFORM": False,
     "LR": 1e-3,
     "TRAINABLE_LAYERS" : -1,
-    "EPOCHS" : 50,
+    "EPOCHS" : 500,
     "OPTIMIZER" : "adam",
     "MOMENTUM" : 0.9, 
     # "SCHEDULE_LR": {
@@ -167,7 +167,7 @@ RANDOM_SEED = 42
 # Modèle
 BACKBONE = "MobileNetV3Large"  # Par défaut: MobileNetV2 (rapide, léger, performant)
 PRETRAINED_WEIGHTS = "imagenet"
-ALPHA = 0.75
+ALPHA = 1.0
 
 # Export TFLite
 TFLITE_QUANTIZATION = True

@@ -113,10 +113,12 @@ def check_previous_checkpoints(model_dir, model_name):
     
 
 def return_model_backbone(model):
-    nb_layers = config.BACKBONE_TRAINING.TRAINABLE_LAYERS if config.BACKBONE_TRAINING.TRAINABLE_LAYERS else len(model.get_layer(config.BACKBONE).layers)
-    nb_layers = min(nb_layers, len(model.get_layer(config.BACKBONE).layers))
-    start_layer = len(model.get_layer(config.BACKBONE).layers) - nb_layers
-    for l, layer in enumerate(model.get_layer(config.BACKBONE).layers):
+    # layer_name = [layer.name for layer in model.layers][1]
+    nb_layers = config.BACKBONE_TRAINING.TRAINABLE_LAYERS if config.BACKBONE_TRAINING.TRAINABLE_LAYERS else len(model.layers)
+    # nb_layers = min(nb_layers, len(model.get_layer(layer_name).layers))
+    nb_layers = min(nb_layers, len(model.layers))
+    start_layer = len(model.layers) - nb_layers
+    for l, layer in enumerate(model.layers):
         if l >= start_layer:
             if not isinstance(layer, tf.keras.layers.BatchNormalization):
                 layer.trainable = True
@@ -217,7 +219,7 @@ def train_model(model,
                 optimizer = keras.optimizers.SGD(learning_rate=config_tmp.LR, momentum=config_tmp.MOMENTUM)
             model.compile(
                 optimizer=optimizer,
-                loss=loss_fn,
+                loss='mse',
                 metrics=[]
             )
         else:
