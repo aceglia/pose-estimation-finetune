@@ -62,21 +62,24 @@ def from_heatmaps_to_coords(heatmap, from_prediction=True, input_scale=config.IN
     heatmaps = tf.reshape(heatmaps, [B, H * W, K])
 
     idx = tf.argmax(heatmaps, axis=1, output_type=tf.int32)
+    max = np.max(heatmaps, axis=1)
     # if from_prediction:  # (B, K)
     #     softmax = tf.nn.softmax(heatmaps, axis=1)
     #     idx = tf.argmax(softmax, axis=1, output_type=tf.int32)
 
-    y = idx // W
-    x = idx % W
+    y = idx / W
+    x = idx.numpy().astype(float) % W.numpy().astype(float)
 
     coords = tf.stack([x, y], axis=-1)                        # (B, K, 2)
-    coords = tf.cast(coords, tf.float32) * (input_scale[0] // config.HEATMAP_SIZE[0])
+    coords = tf.cast(coords, tf.float32) * (input_scale / config.HEATMAP_SIZE[0])
 
-    return coords
+    return coords.numpy()[0], max.ravel().round(2)
 
 
 def plot_validation_images(model, val_ds, model_dir=""):
-    img, gt_heatmaps = next(iter(val_ds.take(1)))
+    # img, gt_heatmaps = next(iter(val_ds.unbatch().take(1)))
+    img = np.vstack([item[0].numpy()[None] for item in val_ds.unbatch()][:20])
+    gt_heatmaps = np.vstack([item[1].numpy()[None] for item in val_ds.unbatch()][:20])
     y_pred = model.predict(img)
     pr_coords = y_pred
     if model.output.shape[1:] != (3, 2):
@@ -89,7 +92,7 @@ def plot_validation_images(model, val_ds, model_dir=""):
         gt_coords_tmp = gt_coords[i]
         pr_coords_tmp = pr_coords[i]
         img_tmp = img[i]
-        img_tmp = img_tmp.numpy().astype(np.uint8)
+        img_tmp = img_tmp.astype(np.uint8)
         [plt.scatter(gt_coords_tmp[i, 0], gt_coords_tmp[i, 1], color="r") for i in range(gt_coords_tmp.shape[0])]
         [plt.scatter(pr_coords_tmp[i, 0], pr_coords_tmp[i, 1], color="b", s=10) for i in range(pr_coords_tmp.shape[0])]
         plt.imshow(img_tmp)
@@ -102,11 +105,10 @@ def project_keypoints(keypoints, image_size, paddings, input_size = config.INPUT
     Keypoints ar already projected to the input size, we need to project them on the original image with according padding.
     """
     image_size_square = max(image_size)
-    input_size = input_size[0]
-    keypoints *= image_size_square // input_size 
-    keypoints[0, 1, :] -= np.array((paddings[0]) * (image_size_square // input_size))
-    keypoints[0, 0, :] -= np.array((paddings[1]) * (image_size_square // input_size))
-    return keypoints
+    keypoints *= image_size_square / input_size 
+    keypoints[:, 0] -= np.array((paddings[0]) * (image_size_square / input_size))
+    keypoints[:, 1] -= np.array((paddings[1]) * (image_size_square / input_size))
+    return keypoints.astype(int)
 
 
 def evaluate_model(model, val_ds, model_dir):

@@ -53,7 +53,7 @@ def save_images(img, heatmaps):
 
 
 
-def create_tf_dataset(annotations):
+def create_tf_dataset(annotations, overfit):
     """
     Crée les datasets d'images et de heatmaps
     
@@ -78,8 +78,11 @@ def create_tf_dataset(annotations):
     all_idxs = np.random.RandomState(random_seed).permutation(data_set_size)
     random_train_idx = all_idxs[:train_size]
     random_val_idx = np.random.RandomState(random_seed).permutation(data_set_size)[train_size:]
-    random_train_idx = random_train_idx[0:1]
-    random_val_idx = random_val_idx[0:1]
+    batch_size = config.BATCH_SIZE if not overfit else 1
+    if overfit:
+        random_train_idx = random_train_idx[0:1]
+        random_val_idx = random_val_idx[0:1]
+        
     
     train_img_paths = tf.constant(image_paths[random_train_idx])
     train_landmarks = tf.constant(landmarks[random_train_idx])
@@ -94,19 +97,29 @@ def create_tf_dataset(annotations):
     val_ds = tf.data.Dataset.from_tensor_slices(
         (val_img_paths, val_landmarks)
 )
-    train_dataset = (
-        train_ds
-        .map(decode_image, num_parallel_calls=tf.data.AUTOTUNE)
-        # .map(augment, num_parallel_calls=tf.data.AUTOTUNE)
-        .map(preprocess_common, num_parallel_calls=tf.data.AUTOTUNE)
-        .batch(config.BATCH_SIZE, drop_remainder=True)
-        # .prefetch(tf.data.AUTOTUNE)
-    )
+    if not overfit:
+        train_dataset = (
+            train_ds
+            .map(decode_image, num_parallel_calls=tf.data.AUTOTUNE)
+            .map(augment, num_parallel_calls=tf.data.AUTOTUNE)
+            .map(preprocess_common, num_parallel_calls=tf.data.AUTOTUNE)
+            .batch(batch_size, drop_remainder=True)
+            # .prefetch(tf.data.AUTOTUNE)
+        )
+    else:
+        train_dataset = (
+            train_ds
+            .map(decode_image, num_parallel_calls=tf.data.AUTOTUNE)
+            # .map(augment, num_parallel_calls=tf.data.AUTOTUNE)
+            .map(preprocess_common, num_parallel_calls=tf.data.AUTOTUNE)
+            .batch(batch_size, drop_remainder=True)
+            # .prefetch(1)
+        )
     val_dataset = (
         val_ds
         .map(decode_image, num_parallel_calls=tf.data.AUTOTUNE)
         .map(preprocess_common, num_parallel_calls=tf.data.AUTOTUNE)
-        .batch(config.BATCH_SIZE, drop_remainder=False)
+        .batch(batch_size, drop_remainder=False)
         # .prefetch(tf.data.AUTOTUNE)
     )
     # count = 0
@@ -121,7 +134,7 @@ def create_tf_dataset(annotations):
     return train_dataset, val_dataset
 
 
-def prepare_data():
+def prepare_data(overfit):
     """
     Pipeline complet de préparation des données
     
@@ -134,7 +147,7 @@ def prepare_data():
     if len(annotations) == 0:
         raise ValueError("Aucune annotation trouvée!")
     
-    train_dataset, val_dataset = create_tf_dataset(annotations)
+    train_dataset, val_dataset = create_tf_dataset(annotations, overfit)
     return train_dataset, val_dataset
 
 
