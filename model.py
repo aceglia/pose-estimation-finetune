@@ -206,7 +206,7 @@ def heatmaps_to_coords(heatmaps):
     return coords, probs
 
 
-def build_pose_model(num_keypoints=3, backbone_name="MobileNetV2", input_shape=(192, 192, 3)):
+def build_pose_model(num_keypoints=3, backbone_name="MobileNetV2", input_shape=(192, 192, 3), overfit=False):
     """
     Construit le modèle complet de pose estimation
     
@@ -223,15 +223,26 @@ def build_pose_model(num_keypoints=3, backbone_name="MobileNetV2", input_shape=(
     Returns:
         model: Modèle Keras compilé
     """
-    inputs = keras.Input(shape=input_shape, name="image_input")
+    # inputs = keras.Input(shape=input_shape, name="image_input")
     
     backbone = get_backbone(backbone_name, input_shape, config.ALPHA)
-    
+    batch_size = config.BATCH_SIZE if not overfit else 1
+    x = backbone.output
+    import numpy as np
     backbone.trainable = False
+    if config.OUTPUT_SHAPE is not None:
+        all_shapes = np.array([(layer.output.shape[1], layer.name) for layer in backbone.layers])
+        idx = np.where(all_shapes[:, 0] == config.OUTPUT_SHAPE)[0][-1]
+        name = str(all_shapes[idx, 1])
+        x = backbone.get_layer(name).output
+       
+    while True:
+        x = layers.Conv2DTranspose(256, 4, strides=2, padding="same")(x)
+        if batch_size > 100:
+            x = layers.BatchNormalization()(x)
+        if x.shape[1] // config.HEATMAP_SIZE[0] == 1:
+            break
 
-    x = backbone.get_layer("activation_11").output
-    x = layers.Conv2DTranspose(256, 4, strides=2, padding="same")(x)
-    x = layers.Conv2DTranspose(256, 4, strides=2, padding="same")(x)
     heatmaps = layers.Conv2D(
         num_keypoints,
         1,
@@ -278,7 +289,7 @@ def compile_model(model, learning_rate=1e-4, optimizer_name='adam', loss="mse"):
     return model
 
 
-def create_model():
+def create_model(overfit):
     """
     Pipeline complet de création et compilation du modèle
     
@@ -288,7 +299,8 @@ def create_model():
     model = build_pose_model(
         num_keypoints=config.NUM_KEYPOINTS,
         backbone_name=config.BACKBONE,
-        input_shape=config.INPUT_SHAPE
+        input_shape=config.INPUT_SHAPE, 
+        overfit=overfit
     )
     return model
 

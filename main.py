@@ -13,9 +13,9 @@ from datetime import datetime
 import config
 from data_preprocessing import prepare_data
 from model import create_model
-from train import train_model
+from train import train_model, plot_training_history
 from export_tflite import export_model, test_tflite_model
-from validation_utils import plot_validation_images, evaluate_model
+from validation_utils import  evaluate_model
 import tensorflow as tf
 from train_utils import LandmarkHuberLoss
 
@@ -30,7 +30,7 @@ def main(args):
     print(f"   - Backbone: {config.BACKBONE}")
     print(f"   - Input size: {config.INPUT_SHAPE[0]}x{config.INPUT_SHAPE[1]}")
 
-
+    overfit = args.overfit_one_frame
     if not args.skip_training:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         model_folder_name = config.get_model_folder_name(config.BACKBONE, timestamp)
@@ -42,23 +42,32 @@ def main(args):
         model_dir = os.path.dirname(models_dir)
         model_name = "pose_model"
         model_path = args.model_path
+        logs_dir = os.path.join(model_dir, "logs")
+        if not os.path.exists(logs_dir):
+            logs_dir = os.path.join(os.path.dirname(model_dir), "logs")
+    if args.checkpoints_dir:
+        models_dir = os.path.dirname(args.checkpoints_dir)
+        model_dir = os.path.dirname(models_dir)
 
     tflite_path = None  # Initialiser
     if not args.skip_data_prep:
-        train_ds, val_ds = prepare_data()
+        train_ds, val_ds = prepare_data(overfit)
         print("Data set created")
             
     if not args.skip_training:
-        model = create_model()
+        model = create_model(overfit)
         print("Model created")
 
         model_name = "pose_model"
-        model = train_model(model=model, tf_data_set=(train_ds, val_ds), model_name=model_name, model_dir=model_dir)
-        evaluate_model(model, train_ds, model_dir)
+        model = train_model(model=model, tf_data_set=(train_ds, val_ds), model_name=model_name, model_dir=model_dir, overfit=overfit)
+        ds = val_ds if not overfit else train_ds
+        evaluate_model(model, ds, model_dir)
     
     if args.skip_training:
         model = tf.keras.models.load_model(model_path) #, custom_objects={"LandmarkHuberLoss", LandmarkHuberLoss(56, 126, 1)},)
-        evaluate_model(model, train_ds, model_dir)
+        plot_path = os.path.join(logs_dir, f"pose_model_loss.png")
+        plot_training_history(save_path=None, csv_path=logs_dir)
+        evaluate_model(model, val_ds, model_dir)
 
     if not args.skip_export:
         if args.skip_data_prep:
@@ -134,12 +143,25 @@ def parse_arguments():
         help="Tester le modèle TFLite après conversion"
     )
 
+    parser.add_argument(
+        '--overfit-one-frame',
+        default=False,
+        help="Overfit the model on one image to try the training configuration."
+    )
+
     # Chemins
     parser.add_argument(
         '--model-path',
         type=str,
         default=None,
         help="Chemin vers un modèle existant (si --skip-training)"
+    )
+
+    parser.add_argument(
+        '--checkpoints-dir',
+        type=str,
+        default=None,
+        help="Chemin vers un modèle existant (si --skip-training)"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
     )
     
     return parser.parse_args()
@@ -150,12 +172,14 @@ if __name__ == "__main__":
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"
     # Parser les arguments
     args = parse_arguments()
-    args.backbone = "MobileNetV3Small"
+    args.backbone = "MobileNetV3Large" #"MobileNetV3Large"
+    args.overfit_one_frame = False
     # args.skip_training = True
-    args.skip_export = True
+    # args.skip_export = True
     args.test_tflite = False
-    # args.model_path = r"/mnt/c/Users/Usager/Documents/Amedeo/pose-estimation-finetune/output/MNv3S_20260112_142303/models/pose_model_backbone_final.keras"
-    # args.model_path = r"/mnt/c/Users/neuromolity-lab/Documents/amedeo/pose-estimation-finetune/output/MNv3S_20260102_103228/models/pose_model_final.keras"
+    # args.model_path = r"/mnt/c/Users/Usager/Documents/Amedeo/pose-estimation-finetune/output/ENL4_20260115_171548/models/checkpoints/model_backbone_checkpoint_3300.keras"
+    # args.model_path = r"/mnt/c/Users/Usager/Documents/Amedeo/pose-estimation-finetune/output/MNv3L_20260120_134951/models"
+    # args.checkpoints_dir = r"/mnt/c/Users/Usager/Documents/Amedeo/pose-estimation-finetune/output/MNv3L_20260120_134951/models/checkpoints"
 
     # Lancer le pipeline
     try:

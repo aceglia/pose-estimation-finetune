@@ -43,10 +43,11 @@ def get_model_folder_name(backbone=None, timestamp=None):
     return f"{clean_backbone}_{timestamp}"
 
 class TrainingConfig:
-    def __init__(self, dict):
+    def __init__(self, dict, batch_size):
         self._init_dict = dict
         self.SCHEDULE_LR = None
         self.LR = None
+        self.BATCH_SIZE = batch_size
 
         self._init_from_dict()
 
@@ -54,7 +55,7 @@ class TrainingConfig:
         for key, items in self._init_dict.items():
             if key == "SCHEDULE_LR" and items is not None:
                 name = items.pop("name")
-                self.SCHEDULE_LR = get_schedule(name, items)
+                self.SCHEDULE_LR = self.get_schedule(name, items)
                 continue
             setattr(self, key, items)
         if self.LR is not None and self.SCHEDULE_LR is not None:
@@ -63,42 +64,45 @@ class TrainingConfig:
             setattr(self, "LR", self.SCHEDULE_LR)
 
 
-def get_schedule(name, kwargs):
-    if name == "cosine_decay":
-        return tf.keras.optimizers.schedules.CosineDecay(**kwargs)
-    if name == "exponential_decay":
-        return tf.keras.optimizers.schedules.ExponentialDecay(**kwargs)
-    if name == "inverse_time_decay":
-        return tf.keras.optimizers.schedules.InverseTimeDecay(**kwargs)
-    if name == "piecewise_constant_decay":
-        return tf.keras.optimizers.schedules.PiecewiseConstantDecay(**kwargs)
-    if name == "polynomial_decay":
-        return tf.keras.optimizers.schedules.PolynomialDecay(**kwargs)
+    def get_schedule(self, name, kwargs):
+        if "boundaries" in kwargs:
+            kwargs["boundaries"] = [item * self.BATCH_SIZE for item in kwargs["boundaries"]]
+        if name == "cosine_decay":
+            return tf.keras.optimizers.schedules.CosineDecay(**kwargs)
+        if name == "exponential_decay":
+            return tf.keras.optimizers.schedules.ExponentialDecay(**kwargs)
+        if name == "inverse_time_decay":
+            return tf.keras.optimizers.schedules.InverseTimeDecay(**kwargs)
+        if name == "piecewise_constant_decay":
+            return tf.keras.optimizers.schedules.PiecewiseConstantDecay(**kwargs)
+        if name == "polynomial_decay":
+            return tf.keras.optimizers.schedules.PolynomialDecay(**kwargs)
 
+OUTPUT_SHAPE = "14"
 
 BACKBONE_TRAINING_DICT = {
     "PERFORM": True, 
-    "LR": 1e-3,
+    "LR": 1e-4,
     "TRAINABLE_LAYERS" : None,
-    "EPOCHS" : 300,
+    "EPOCHS" : 1500,
     "OPTIMIZER" : "adam",
     "MOMENTUM" : 0.9, 
     # "SCHEDULE_LR": {
     #     "name": "piecewise_constant_decay",
     #     # "initial_learning_rate": 1e-3, 
-    #     # "decay_steps": 1000,
+    #     # "decay_steps": 75,
     #     # "decay_rate":0.9, 
     #     # "staircase":True, 
-    #     "boundaries": [1500, 10000, 20000], 
-    #     "values":[5e-3, 1e-3, 1e-4, 1e-5]
+    #     "boundaries": [208000, 416000],
+    #     "values":[1e-3, 1e-4, 8e-5]
     # }
 }
 
 HEAD_TRAINING_DICT = {
     "PERFORM": False,
-    "LR": 1e-3,
+    "LR": 5e-4,
     "TRAINABLE_LAYERS" : -1,
-    "EPOCHS" : 500,
+    "EPOCHS" : 2000,
     "OPTIMIZER" : "adam",
     "MOMENTUM" : 0.9, 
     # "SCHEDULE_LR": {
@@ -112,8 +116,10 @@ HEAD_TRAINING_DICT = {
     # }
 }
 
-BACKBONE_TRAINING = TrainingConfig(BACKBONE_TRAINING_DICT)
-HEAD_TRAINING = TrainingConfig(HEAD_TRAINING_DICT)
+BATCH_SIZE = 8
+
+BACKBONE_TRAINING = TrainingConfig(BACKBONE_TRAINING_DICT, BATCH_SIZE)
+HEAD_TRAINING = TrainingConfig(HEAD_TRAINING_DICT, BATCH_SIZE)
 
 # Dossier modèle actuel (sera défini dynamiquement)
 MODEL_DIR = None
@@ -156,12 +162,11 @@ KEYPOINT_INDICES = {
 IMAGE_SIZE = (224, 224)
 INPUT_SHAPE = (*IMAGE_SIZE, 3)
 HEATMAP_SIZE = (56, 56)
-HEATMAP_SIGMA = 2.0
+HEATMAP_SIGMA = 1.5
 
 # Entraînement
-TRAIN_SPLIT = 0.9
-BATCH_SIZE = 1 #32
-RANDOM_SEED = 42
+TRAIN_SPLIT = 0.95
+RANDOM_SEED = 58
 
 
 # Modèle

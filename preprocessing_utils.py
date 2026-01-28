@@ -103,15 +103,15 @@ def augment(image, landmarks, aug_prob=0.8):
 
         # -------- brightness --------
         image = tf.cond(
-            tf.random.uniform([]) < 0.6,
-            lambda: tf.image.random_brightness(image, 0.4),
+            tf.random.uniform([]) < 0.4,
+            lambda: tf.image.random_brightness(image, 0.2),
             lambda: image
         )
 
         # -------- contrast --------
         image = tf.cond(
-            tf.random.uniform([]) < 0.6,
-            lambda: tf.image.random_contrast(image, 0.1, 0.8),
+            tf.random.uniform([]) < 0.4,
+            lambda: tf.image.random_contrast(image, 0.1, 0.3),
             lambda: image
         )
 
@@ -199,7 +199,7 @@ def decode_and_resize(image, target):
     pad_x = (target - new_w) // 2
     pad_y = (target - new_h) // 2
     image = tf.expand_dims(image, 0)
-    return image, [pad_x, pad_y]
+    return image, [pad_x.numpy(), pad_y.numpy()]
 
 
 def gaussian_heatmap(coords, size, sigma=2):
