@@ -75,11 +75,43 @@ def from_heatmaps_to_coords(heatmap, from_prediction=True, input_scale=config.IN
 
     return coords.numpy()[0], max.ravel().round(2)
 
+def project_to_heatmap(points, h, w, input_shape, heatmap_size):
+    scale = tf.minimum(
+        input_shape / tf.cast(w, tf.float32),
+        input_shape / tf.cast(h, tf.float32)
+    )
+    new_w = tf.cast(tf.cast(w, tf.float32) * scale, tf.int32)
+    new_h = tf.cast(tf.cast(h, tf.float32) * scale, tf.int32)
+    # image = tf.image.resize(image, (new_w, new_h))
 
-def plot_validation_images(model, val_ds, model_dir=""):
+    pad_x = (input_shape - new_w) // 2
+    pad_y = (input_shape - new_h) // 2
+    points = tf.reshape(points, (-1, 2))
+
+    points = tf.cast(points, tf.float32) * scale
+    points = points + [tf.cast(pad_x, tf.float32), tf.cast(pad_y, tf.float32)]
+    points = points / input_shape
+    H, W = heatmap_size, heatmap_size
+    points = tf.cast(points, tf.float32)
+
+    # Convert normalized coords to pixel space
+    xs = points[:, 0] * tf.cast(W, tf.float32)
+    ys = points[:, 1] * tf.cast(H, tf.float32)
+    return xs, ys
+
+
+def plot_validation_images(model, val_ds, model_dir="", annotations=[]):
     # img, gt_heatmaps = next(iter(val_ds.unbatch().take(1)))
     img = np.vstack([item[0].numpy()[None] for item in val_ds.unbatch()][:20])
     gt_heatmaps = np.vstack([item[1].numpy()[None] for item in val_ds.unbatch()][:20])
+    # val_annotations = annotations[1]
+    # points = np.vstack([np.array(list(a['keypoints'].values()))[None] for a in val_annotations])
+    # h, w = 1080, 1920
+    # x, y = project_to_heatmap(points[0], h, w, config.INPUT_SHAPE[0], config.HEATMAP_SIZE[0])
+    # plt.imshow(gt_heatmaps[0] * 255)
+    # plt.scatter(x, y, color="r")
+    # plt.show()
+
     y_pred = model.predict(img)
     pr_coords = y_pred
     if model.output.shape[1:] != (3, 2):
@@ -111,5 +143,5 @@ def project_keypoints(keypoints, image_size, paddings, input_size = config.INPUT
     return keypoints.astype(int)
 
 
-def evaluate_model(model, val_ds, model_dir):
-    plot_validation_images(model, val_ds, model_dir)
+def evaluate_model(model, val_ds, model_dir, annotations):
+    plot_validation_images(model, val_ds, model_dir, annotations)

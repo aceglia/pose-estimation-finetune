@@ -82,7 +82,9 @@ def create_tf_dataset(annotations, overfit):
     if overfit:
         random_train_idx = random_train_idx[0:1]
         random_val_idx = random_val_idx[0:1]
-        
+    
+    annotations_val = np.array(annotations)[random_val_idx]
+    annotations_train = np.array(annotations)[random_train_idx]
     
     train_img_paths = tf.constant(image_paths[random_train_idx])
     train_landmarks = tf.constant(landmarks[random_train_idx])
@@ -131,7 +133,7 @@ def create_tf_dataset(annotations, overfit):
     #     count += 1
     #     if count == 3:
     #         break
-    return train_dataset, val_dataset
+    return train_dataset, val_dataset, [annotations_train, annotations_val]
 
 
 def prepare_data(overfit):
@@ -147,8 +149,8 @@ def prepare_data(overfit):
     if len(annotations) == 0:
         raise ValueError("Aucune annotation trouvée!")
     
-    train_dataset, val_dataset = create_tf_dataset(annotations, overfit)
-    return train_dataset, val_dataset
+    train_dataset, val_dataset, annotations = create_tf_dataset(annotations, overfit)
+    return train_dataset, val_dataset, annotations
 
 
 if __name__ == "__main__":
