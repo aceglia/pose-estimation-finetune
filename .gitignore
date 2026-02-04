@@ -8,6 +8,7 @@ venv/
 env/
 ENV/
 .venv
+annotations/data/
 
 # Jupyter
 .ipynb_checkpoints
